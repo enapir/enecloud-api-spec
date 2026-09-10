@@ -1,0 +1,6 @@
+# 仕様サイト（GitHub Pages）のビルド用。
+# MkDocs 2.0 はプラグイン機構・テーマ機構が非互換になることが予告されているため、
+# 意図しない破壊を避けて版を固定する。更新時は必ずローカルで mkdocs build を通すこと。
+mkdocs==1.6.1
+mkdocs-material==9.7.7
+pymdown-extensions==11.0.2

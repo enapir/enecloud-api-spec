@@ -1,0 +1,56 @@
+name: Deploy spec site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 進行中のデプロイは中断せず、後続をキューに積む
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install MkDocs
+        run: pip install -r requirements.txt
+
+      # Redoc ページと OpenAPI 定義を docs_dir に取り込み、MkDocs にそのまま
+      # 静的ファイルとして配信させる。これにより以下の既存 URL が維持される:
+      #   /ems-v2.html /vpp-v1.html /ems-v1.html /openapi/*.yaml
+      # 仕様書内の ../openapi/*.yaml リンクもビルド時に解決する。
+      - name: Stage static assets into docs_dir
+        run: |
+          cp -r openapi docs/openapi
+          cp ems-v1.html ems-v2.html vpp-v1.html docs/
+
+      - name: Build site
+        run: mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

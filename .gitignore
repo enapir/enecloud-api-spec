@@ -1,0 +1,12 @@
+# MkDocs のビルド成果物
+/site/
+
+# ビルド時に docs_dir へ一時配置する静的アセット（.github/workflows/pages.yml が生成）
+/docs/openapi/
+/docs/ems-v1.html
+/docs/ems-v2.html
+/docs/vpp-v1.html
+
+# Python 仮想環境
+.venv/
+venv/

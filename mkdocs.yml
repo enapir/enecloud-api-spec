@@ -1,0 +1,98 @@
+site_name: ENECloud EMS / VPP API 仕様
+site_description: 株式会社ナピルが提供する ENECloud EMS OpenAPI および VPP API の公開仕様
+site_author: 株式会社ナピル ソリューション事業部 EMS開発担当
+site_url: https://enapir.github.io/enecloud-api-spec/
+repo_url: https://github.com/enapir/enecloud-api-spec
+repo_name: enapir/enecloud-api-spec
+edit_uri: edit/main/docs/
+copyright: © 2026 株式会社ナピル (Napir Co., Ltd.) — 仕様文書は CC BY 4.0
+
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+
+validation:
+  links:
+    # 仕様書内の `../openapi/*.yaml` は GitHub の blob ビュー
+    # （docs/ から見て 1 つ上）と、生成サイト（/ems-openapi-v2/ から見て 1 つ上）の
+    # 双方で正しく解決する。MkDocs の検証は docs_dir 基準で解決するため
+    # 誤検知になるので info に落とす。文書内リンクの検証は
+    # .github/scripts/check-anchors.mjs（GitHub 準拠）が CI で担当する。
+    not_found: info
+    anchors: info
+
+theme:
+  name: material
+  language: ja
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+  palette:
+    # 閲覧者のテーマ設定に追従しつつ、手動切り替えも可能にする
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: ライト / ダークを切り替え
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: ダークテーマに切り替え
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: ライトテーマに切り替え
+
+nav:
+  - ホーム: index.md
+  - EMS OpenAPI v2 (2.2):
+      - 説明書: ems-openapi-v2.md
+      - サンプル集: ems-openapi-v2-samples.md
+  - VPP API v1 (1.4): vpp-api-v1.md
+  - EMS OpenAPI v1 (1.13・旧版): ems-openapi-v1.md
+
+plugins:
+  - search:
+      lang:
+        - ja
+        - en
+
+markdown_extensions:
+  - tables
+  - attr_list
+  - md_in_html
+  - admonition
+  - footnotes
+  - toc:
+      # GitHub と同一のアンカーを生成する。仕様書内の相対リンクは
+      # GitHub の blob ビューと本サイトの両方で解決する必要があるため必須。
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+      permalink: true
+      toc_depth: 4
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/enapir/enecloud-api-spec

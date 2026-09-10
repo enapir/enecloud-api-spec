@@ -37,6 +37,16 @@
    ```
 
 4. 改行コードは LF に固定しています（[.gitattributes](.gitattributes)）
+5. 仕様サイト（GitHub Pages）をローカルで確認する場合:
+
+   ```bash
+   pip install -r requirements.txt
+   # Redoc ページと OpenAPI 定義を docs_dir に配置（CI と同じ手順）
+   cp -r openapi docs/openapi && cp ems-v1.html ems-v2.html vpp-v1.html docs/
+   mkdocs serve          # http://127.0.0.1:8000/
+   ```
+
+   `docs/openapi/` と `docs/*.html` はビルド時の一時配置で、[.gitignore](.gitignore) 済みです。
 
 ## 表記の約束
 

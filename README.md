@@ -5,13 +5,15 @@
 
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 
+📖 **[仕様サイト（検索・サイドバー付き）→ enapir.github.io/enecloud-api-spec](https://enapir.github.io/enecloud-api-spec/)**
+
 ---
 
 ## 📖 仕様一覧
 
 | API | 版 | パスプレフィックス | 仕様書 | OpenAPI | リファレンス |
 |---|---|---|---|---|---|
-| **EMS OpenAPI v2** ⭐推奨 | 2.2 | `/v2/ems/{id}/` | [docs/ems-openapi-v2.md](docs/ems-openapi-v2.md) | [yaml](openapi/ems-openapi-v2.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/ems-v2.html) |
+| **EMS OpenAPI v2** ⭐推奨 | 2.2 | `/v2/ems/{id}/` | [docs/ems-openapi-v2.md](docs/ems-openapi-v2.md)<br>[サンプル集](docs/ems-openapi-v2-samples.md) | [yaml](openapi/ems-openapi-v2.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/ems-v2.html) |
 | **VPP API v1** ⭐推奨 | 1.4 | `/v1/vpp/{vpp_id}/` | [docs/vpp-api-v1.md](docs/vpp-api-v1.md) | [yaml](openapi/vpp-openapi-v1.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/vpp-v1.html) |
 | EMS OpenAPI v1（旧版・既存互換） | 1.13 | `/v1/ems/{id}/` | [docs/ems-openapi-v1.md](docs/ems-openapi-v1.md) | [yaml](openapi/ems-openapi-v1.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/ems-v1.html) |
 
@@ -121,6 +123,7 @@
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 誤記報告・Pull Request の進め方、表記の約束 |
 | [SECURITY.md](SECURITY.md) | セキュリティに関する報告先 |
 | [LICENSE](LICENSE) | CC BY 4.0 とその適用範囲 |
+| [mkdocs.yml](mkdocs.yml) / [requirements.txt](requirements.txt) | 仕様サイト（GitHub Pages）のビルド設定 |
 
 ---
 
