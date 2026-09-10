@@ -105,13 +105,11 @@
 
 ---
 
-## 💬 フィードバック
+## 💬 お問い合わせ
 
-仕様の誤記・不整合のご指摘は [Issues](../../issues/new/choose) からお願いします（誤記報告テンプレートをご用意しています）。
-報告・修正提案の進め方は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+仕様に関する**外部からのお問い合わせ窓口**は **[ems_support@enapir.com](mailto:ems_support@enapir.com)** です（公開サイトにも同じ窓口を掲載しています）。
 
-⚠️ **実エンドポイントの障害・接続不具合、Base URL / 認証情報のお問い合わせは Issues では受け付けていません。**
-ご契約時にご案内している窓口へご連絡ください（[SECURITY.md](SECURITY.md)）。
+社内での誤記報告・修正提案の進め方は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ---
 

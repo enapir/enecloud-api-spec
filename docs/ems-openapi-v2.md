@@ -5,7 +5,7 @@
 **最終更新日**: 2026年7月25日
 **作成者**: 株式会社ナピル ソリューション事業部 EMS開発担当
 **ライセンス**: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — 出典表示のもと、引用・再配布・本仕様に準拠した実装が可能です。
-**OpenAPI 定義**: [`openapi/ems-openapi-v2.yaml`](https://github.com/enapir/enecloud-api-spec/blob/main/openapi/ems-openapi-v2.yaml)
+**OpenAPI 定義**: <a href="../openapi/ems-openapi-v2.yaml" download="ems-openapi-v2.yaml"><code>ems-openapi-v2.yaml</code></a>（ダウンロード）
 
 > ### 本書の位置づけ
 >

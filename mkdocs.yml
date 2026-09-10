@@ -2,9 +2,6 @@ site_name: ENECloud EMS / VPP API 仕様
 site_description: 株式会社ナピルが提供する ENECloud EMS OpenAPI および VPP API の公開仕様
 site_author: 株式会社ナピル ソリューション事業部 EMS開発担当
 site_url: https://enapir.github.io/enecloud-api-spec/
-repo_url: https://github.com/enapir/enecloud-api-spec
-repo_name: enapir/enecloud-api-spec
-edit_uri: edit/main/docs/
 copyright: © 2026 株式会社ナピル (Napir Co., Ltd.) — 仕様文書は CC BY 4.0
 
 docs_dir: docs
@@ -33,7 +30,6 @@ theme:
     - search.highlight
     - search.suggest
     - content.code.copy
-    - content.action.edit
   palette:
     # 閲覧者のテーマ設定に追従しつつ、手動切り替えも可能にする
     - media: "(prefers-color-scheme)"
@@ -93,8 +89,3 @@ markdown_extensions:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-
-extra:
-  social:
-    - icon: fontawesome/brands/github
-      link: https://github.com/enapir/enecloud-api-spec

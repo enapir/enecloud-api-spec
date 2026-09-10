@@ -19,7 +19,7 @@
 [📘 API リファレンス](ems-v2.html){ .md-button .md-button--primary }
 [説明書](ems-openapi-v2.md){ .md-button }
 [サンプル集](ems-openapi-v2-samples.md){ .md-button }
-[OpenAPI YAML](https://github.com/enapir/enecloud-api-spec/blob/main/openapi/ems-openapi-v2.yaml){ .md-button }
+[OpenAPI YAML をダウンロード](openapi/ems-openapi-v2.yaml){ .md-button download="ems-openapi-v2.yaml" }
 
 ### VPP API v1 ⭐推奨
 
@@ -31,7 +31,7 @@
 [📘 API リファレンス](vpp-v1.html){ .md-button .md-button--primary }
 [説明書](vpp-api-v1.md){ .md-button }
 [サンプル集](vpp-api-v1-samples.md){ .md-button }
-[OpenAPI YAML](https://github.com/enapir/enecloud-api-spec/blob/main/openapi/vpp-openapi-v1.yaml){ .md-button }
+[OpenAPI YAML をダウンロード](openapi/vpp-openapi-v1.yaml){ .md-button download="vpp-openapi-v1.yaml" }
 
 ### EMS OpenAPI v1（旧版・既存互換）
 
@@ -41,13 +41,12 @@
 
 [📘 API リファレンス](ems-v1.html){ .md-button }
 [説明書](ems-openapi-v1.md){ .md-button }
-[OpenAPI YAML](https://github.com/enapir/enecloud-api-spec/blob/main/openapi/ems-openapi-v1.yaml){ .md-button }
+[OpenAPI YAML をダウンロード](openapi/ems-openapi-v1.yaml){ .md-button download="ems-openapi-v1.yaml" }
 
 ---
 
 !!! tip "コード生成・ツール連携で OpenAPI 定義を直接取得する場合"
-    本サイトからも配信しています（ブラウザで直接開くと GitHub Pages が `charset` を付与しないため
-    日本語が文字化けしますが、ファイル自体は UTF-8 で正しく、`curl` や各種ツールからの取得には影響しません）。
+    次の URL を `curl` や各種ツールにそのまま指定できます。
 
     ```
     https://enapir.github.io/enecloud-api-spec/openapi/ems-openapi-v2.yaml
@@ -55,7 +54,8 @@
     https://enapir.github.io/enecloud-api-spec/openapi/ems-openapi-v1.yaml
     ```
 
-    ブラウザで読む場合は上記の **OpenAPI YAML** ボタン（GitHub 上の表示）をご利用ください。
+    ブラウザで上記 URL を直接開くと、配信時に文字コード（charset）が付与されないため日本語が文字化けして表示されます。
+    ファイル自体は UTF-8 で正しいため、ブラウザからは上の **OpenAPI YAML をダウンロード** ボタンで保存してください。
 
 ---
 
@@ -89,7 +89,7 @@
 
 ## ライセンスと利用条件
 
-本リポジトリの**仕様文書**（`docs/` および `openapi/`）は
+本サイトで公開している**仕様文書**（説明書・サンプル集・OpenAPI 定義）は
 [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/) で提供されます。
 出典を表示すれば、引用・再配布・本仕様に準拠した実装が可能です。
 
@@ -99,9 +99,8 @@
 
 ---
 
-## フィードバック
+## お問い合わせ
 
-仕様の誤記・不整合のご指摘は [Issues](https://github.com/enapir/enecloud-api-spec/issues/new/choose) からお願いします。
+仕様に関するご質問・誤記のご指摘は、下記までお問い合わせください。
 
-**実エンドポイントの障害・接続不具合、Base URL / 認証情報のお問い合わせは Issues では受け付けていません。**
-ご契約時にご案内している窓口へご連絡ください。
+**ENECloud EMS サポート**: [ems_support@enapir.com](mailto:ems_support@enapir.com)
