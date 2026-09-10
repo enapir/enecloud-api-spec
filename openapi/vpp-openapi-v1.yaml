@@ -1,0 +1,1251 @@
+openapi: 3.1.0
+info:
+  title: ENECloud EMS VPP API
+  version: "1.3"
+  description: |
+    VPP API（仮想 EMS）。複数の物理 EMS（最大 100 メンバー）を束ねる API。
+
+    設計原則: VPP API は物理 EMS API v2.2 と**同じ JSON 構造・同じフィールド名**を採用する。
+    差分は members 関連フィールド（vpp_id / members[] / member_baselines[] / uncovered_kw）の有無のみ。
+    アグリゲーターのデータ取得（監視・精算）は VPP API のみで完結する（v1.3 原則。
+    物理 EMS API の直接呼び出しは /baseline 登録・/specifications 参照・保守診断に限定）。
+
+    物理 EMS API v2.2 と一体で運用する前提。
+
+    v1.3 主要変更（非互換変更あり）:
+    /measurements/energy のレスポンスを常に data[] 配列に統一（省略時は期間全体 1 レコード、
+    メンバー別イベント系フィールドは廃止）、interval_seconds（1800/3600/86400）によるコマ別・日次取得、
+    ems_ids フィルタと複合上限（レコード数 × メンバー数 ≤ 44,640）、
+    include_components（/status/details・/measurements/*）による multi_component メンバーの component 個別値返却、
+    multi_component メンバーのサイトレベル精算フィールド（fit/fip/non_subsidized_export_kwh 等）解禁、
+    /measurements/active_power の interval_seconds を 1/60/1800/3600/86400 の 5 値に離散化。
+
+    v1.2 主要変更: baseline 欠落・配信失敗の dispatch_status（skipped_baseline_missing / failed）追加、
+    jepx-da ⇄ jepx-ttv の後勝ち上書き、レートリミット 2 バケット化（参照系 1000/h・制御系 200/h）、
+    履歴 API の複合上限（ポイント数 × メンバー数 ≤ 446,400）と ems_ids フィルタ、
+    スケジュール取得範囲を未来 90 日に拡大、active_sku 集約の決定的規則化（不一致時 "mixed"）、
+    複数 VPP 重複登録の禁止、resource_type の /specifications 突合。
+  contact:
+    name: 株式会社ナピル
+  license:
+    name: CC BY 4.0
+    url: https://creativecommons.org/licenses/by/4.0/
+
+servers:
+  - url: '{baseUrl}'
+    description: |
+      Base URL（本番／テスト環境のホスト名）は公開仕様には含めません。
+      ご契約時に個別提供される値を baseUrl に設定してください。
+    variables:
+      baseUrl:
+        default: 'https://HOST'
+        description: 契約時に個別提供される Base URL（例 https://HOST）
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: 認証
+  - name: Members
+    description: メンバー管理
+  - name: Status
+    description: リアルタイム状態取得
+  - name: Control
+    description: 有効電力制御
+  - name: Schedules
+    description: スケジュール管理
+  - name: Measurements
+    description: 履歴 API
+
+paths:
+
+  /auth/refresh:
+    post:
+      operationId: refreshAccessToken
+      tags: [Auth]
+      summary: Access Token 取得（物理 EMS API と共通）
+      description: |
+        VPP 用 Refresh Token を Authorization ヘッダーで送信し、Access Token を取得
+
+        注: 認証エンドポイントは API 本体とは別ホストで提供される。
+        各ホストの Base URL は契約時に個別提供する。
+      security:
+        - refreshAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/vpp/{vpp_id}/members:
+    get:
+      operationId: listMembers
+      tags: [Members]
+      summary: メンバー一覧取得
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembersListResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: addMember
+      tags: [Members]
+      summary: メンバー登録
+      description: |
+        resource_type は物理 EMS /specifications の components 構成と突合され、不一致時は 400
+        （resource_type_mismatch）。同一 ems_id は 1 つの VPP にのみ登録可能で、他 VPP 登録済みは
+        409（ems_registered_to_other_vpp）。
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberCreateRequest'
+      responses:
+        '200':
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberCreateResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /v1/vpp/{vpp_id}/members/{ems_id}:
+    post:
+      operationId: updateMember
+      tags: [Members]
+      summary: メンバーパラメータ更新
+      description: |
+        allocation_weight / label を更新。
+        ems_id / resource_type / 廃止フィールド（default_baseline_kw 等）の指定は 400 エラー。
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberUpdateRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberUpdateResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      operationId: deleteMember
+      tags: [Members]
+      summary: メンバー削除
+      description: 物理 EMS そのものは削除しない（VPP からの紐付けのみ解除）
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteSuccessResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/vpp/{vpp_id}/status:
+    get:
+      operationId: getVppStatus
+      tags: [Status]
+      summary: リアルタイム状態取得（概要）
+      description: |
+        top-level 集計値 + members[] のフラット構造。
+        集計値は配下 in_service メンバーの稼働中合算（VPP 内に保管せず、物理 EMS から派生）。
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VppStatusResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/vpp/{vpp_id}/status/details:
+    get:
+      operationId: getVppStatusDetails
+      tags: [Status]
+      summary: リアルタイム状態取得（詳細、ブロック構造）
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+        - name: include_components
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: |
+            true 指定時、multi_component メンバーの members[] 要素に components[]
+            （component 個別の現在状態: 蓄電池の充放電電力・soc、PV の発電電力・irradiance_w_m2 等）を
+            含めて返却（v1.3）。フィールド定義は物理 EMS API §9.2.2 の components[] と同一。
+            概要 /status では指定不可（無視される）。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VppStatusDetailsResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/vpp/{vpp_id}/control/active_power:
+    post:
+      operationId: controlVppActivePower
+      tags: [Control]
+      summary: VPP 有効電力指令（即座/スケジュール）
+      description: |
+        VPP 全体への指令を allocation_weight で配下メンバーへ自動按分。
+
+        **member_baselines[] は全 in_service メンバー分必須指定**（VPP はベースライン値を保管しない設計）。
+        consumer メンバーは事前に物理 EMS /baseline で 30 分粒度値を取得しておく。
+
+        配信失敗・種別不適合メンバーは dispatch_status（skipped_* / failed）+ skip_reason で表現し、
+        その分は uncovered_kw に積算（VPP リクエスト全体は 200 OK）。
+        type=schedule の実行時再評価で baseline 未指定のまま in_service 復帰したメンバーは
+        skipped_baseline_missing としてスキップし残メンバーで再按分。
+        delta_kw の合計利用可能電力超過チェックは type=immediate のみ（schedule は実行時クリップ）。
+
+        スケジュール重複は後勝ちルール（jepx-da ⇄ jepx-ttv は同一 kWh ディスパッチカテゴリとして上書き、
+        異なる市場応札 SKU 同士は別 schedule_id で併存）。実行中スケジュールへの上書き POST も可能。
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VppControlActivePowerRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VppControlActivePowerResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/vpp/{vpp_id}/control/active_power/schedules:
+    get:
+      operationId: listVppActivePowerSchedules
+      tags: [Schedules]
+      summary: スケジュール一覧取得
+      description: 取得範囲は過去 30 日 〜 未来 90 日（登録可能範囲と一致）
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+        - name: start_time_from
+          in: query
+          schema: { type: string, format: date-time }
+          description: 現在時刻 - 30 日 以降
+        - name: start_time_to
+          in: query
+          schema: { type: string, format: date-time }
+          description: 現在時刻 + 90 日 以前
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VppSchedulesListResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+    delete:
+      operationId: deleteVppActivePowerSchedule
+      tags: [Schedules]
+      summary: スケジュール削除（配下メンバーの個別スケジュールも連動削除）
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+        - name: schedule_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteSuccessResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /v1/vpp/{vpp_id}/measurements/active_power:
+    post:
+      operationId: getVppActivePowerMeasurements
+      tags: [Measurements]
+      summary: 瞬時電力履歴取得（メンバー別 + VPP 集計）
+      description: |
+        各 data[] 要素は top-level 集計値 + members[]。
+        保管 60 日 / interval_seconds は 1・60・1800・3600・86400 の 5 値のみ（デフォルト 60、v1.3 で離散化）/
+        取得期間最大 31 日 / 最大時系列ポイント数 44,640 件。
+        複合上限: 時系列ポイント数 × 取得対象メンバー数 ≤ 446,400（超過時 410）。ems_ids で絞り込み可。
+        include_components: true（v1.3）で multi_component メンバーの component 個別値も返却。
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeasurementsActivePowerRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VppMeasurementsActivePowerResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /v1/vpp/{vpp_id}/measurements/energy:
+    post:
+      operationId: getVppEnergyMeasurements
+      tags: [Measurements]
+      summary: 電力量履歴取得（メンバー別 + VPP 集計）
+      description: |
+        レスポンスは常に data[] 配列（v1.3 で /measurements/active_power と統一、非互換変更）。
+        interval_seconds 省略時は期間全体を 1 レコード、1800 / 3600 / 86400 指定で
+        コマ別・時間別・日次の複数レコード（30 分コマ単位の精算検証が VPP API 単独で可能）。
+        保管 12 か月（365 日）/ 最小取得期間 60 秒 / 取得期間最大 31 日。
+        複合上限: 時系列レコード数 × 取得対象メンバー数 ≤ 44,640（超過時 410、ems_ids で絞り込み可）。
+        イベント系（dr_dispatched_count / dr_total_dispatched_minutes）は期間サマリとして top-level のみ
+        （メンバー別イベント系は v1.3 で廃止）。
+        include_components: true で multi_component メンバーの components[]（経路追跡フィールド含む）を返却。
+      parameters:
+        - $ref: '#/components/parameters/VppIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeasurementsEnergyRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VppMeasurementsEnergyResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT (Access Token)
+    refreshAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT (Refresh Token)
+
+  parameters:
+    VppIdPath:
+      name: vpp_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
+        example: f1b2c3d4e5f6789012345678901234ab
+      description: VPP 識別子（16 バイト UUID = 32 文字 hex、ハイフン無し）
+    EmsIdPath:
+      name: ems_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
+        example: a1b2c3d4e5f6789012345678901234ab
+      description: 配下メンバーの EMS 識別子
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+      description: 冪等性キー（24 時間保持）
+
+  schemas:
+
+    AuthResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        expires_in: { type: integer }
+
+    DeleteSuccessResponse:
+      type: object
+      required: [message, timestamp]
+      properties:
+        vpp_id: { type: string }
+        message: { type: string, example: 'Resource deleted successfully' }
+        ems_id: { type: string }
+        schedule_id: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    # ========== 共通 ==========
+
+    ResourceType:
+      type: string
+      enum: [battery, generator, consumer, multi_component]
+
+    Sku:
+      type: string
+      enum: [fcr, s-frr, frr, rr, rr-fit, compound, jepx-da, jepx-ttv, negawatt-spot]
+
+    DispatchStatus:
+      type: string
+      enum:
+        - dispatched
+        - skipped_out_of_service
+        - skipped_incompatible
+        - skipped_weight_zero
+        - skipped_baseline_missing
+        - failed
+        - pending
+      description: |
+        skipped_baseline_missing: schedule 実行時再評価で baseline 未指定。
+        failed: 物理 EMS への配信失敗（通信断・5xx・リトライ上限到達）、uncovered_kw に積算。
+
+    CompoundBreakdown:
+      type: object
+      description: |
+        複合商品の容量内訳。キーは fcr_response_kw / s-frr / frr / rr の 2 つ以上の組み合わせ。
+        内数ロジック: max(|各値|) = |delta_kw|
+      additionalProperties:
+        type: number
+
+    # ========== メンバー管理 ==========
+
+    Member:
+      type: object
+      required: [ems_id, resource_type, allocation_weight, registered_at]
+      properties:
+        ems_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+        label:
+          type: string
+          maxLength: 64
+        resource_type:
+          $ref: '#/components/schemas/ResourceType'
+        allocation_weight:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: |
+            按分重み（デフォルト 100）。0 を設定すると登録維持のまま分配除外（一時停止）。
+            実分配比率 = weight(i) / Σweight（in_service かつ weight>0 のメンバー合計）
+        registered_at:
+          type: string
+          format: date-time
+
+    MembersListResponse:
+      type: object
+      required: [vpp_id, members, total_count, timestamp]
+      properties:
+        vpp_id: { type: string }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/Member' }
+        total_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+        timestamp: { type: string, format: date-time }
+
+    MemberCreateRequest:
+      type: object
+      required: [ems_id, resource_type]
+      properties:
+        ems_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+        label:
+          type: string
+          maxLength: 64
+        resource_type:
+          $ref: '#/components/schemas/ResourceType'
+        allocation_weight:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          default: 100
+
+    MemberCreateResponse:
+      type: object
+      required: [vpp_id, ems_id, resource_type, allocation_weight, registered_at, timestamp]
+      properties:
+        vpp_id: { type: string }
+        message: { type: string }
+        ems_id: { type: string }
+        label: { type: string }
+        resource_type: { $ref: '#/components/schemas/ResourceType' }
+        allocation_weight: { type: number }
+        registered_at: { type: string, format: date-time }
+        timestamp: { type: string, format: date-time }
+
+    MemberUpdateRequest:
+      type: object
+      description: 変更したい項目のみ指定。ems_id / resource_type / 廃止フィールドは指定不可
+      properties:
+        allocation_weight:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+        label:
+          type: string
+          maxLength: 64
+
+    MemberUpdateResponse:
+      type: object
+      required: [vpp_id, ems_id, resource_type, allocation_weight, timestamp]
+      properties:
+        vpp_id: { type: string }
+        message: { type: string }
+        ems_id: { type: string }
+        label: { type: string }
+        resource_type: { $ref: '#/components/schemas/ResourceType' }
+        allocation_weight: { type: number }
+        timestamp: { type: string, format: date-time }
+
+    # ========== /status, /status/details ==========
+
+    VppMemberStatus:
+      type: object
+      required: [ems_id, status, current_kw, baseline_kw, delta_kw, dispatched_delta_kw, has_warning, measure_timestamp]
+      properties:
+        ems_id: { type: string }
+        status: { type: integer, enum: [0, 9] }
+        label: { type: string }
+        allocation_weight: { type: number }
+        fcr_active: { type: integer, enum: [0, 1] }
+        dr_active: { type: [integer, 'null'], enum: [0, 1, null] }
+        current_kw: { type: [number, 'null'], description: '計測欠損時は null' }
+        baseline_kw:
+          type: number
+          description: 物理 EMS /status から引き当てた値（consumer は /baseline 登録値、その他は schedule の baseline_kw）
+        delta_kw: { type: [number, 'null'] }
+        dispatched_delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        import_energy_available: { type: [number, 'null'] }
+        export_energy_available: { type: [number, 'null'] }
+        import_power_available: { type: number }
+        export_power_available: { type: number }
+        output_control_limit: { type: [integer, 'null'] }
+        output_control_reason: { type: [string, 'null'] }
+        soc: { type: [number, 'null'] }
+        irradiance_w_m2: { type: [number, 'null'] }
+        dr_target_reduction_kw: { type: [number, 'null'] }
+        dr_actual_reduction_kw: { type: [number, 'null'] }
+        active_sku: { type: [string, 'null'], description: 'メンバー個別の応動中 SKU（非応動時 null、複合応動中は "compound"）' }
+        last_dispatch_status:
+          type: [string, 'null']
+          enum:
+            - dispatched
+            - skipped_out_of_service
+            - skipped_incompatible
+            - skipped_weight_zero
+            - skipped_baseline_missing
+            - failed
+            - pending
+        has_warning: { type: integer, enum: [0, 1] }
+        measure_timestamp: { type: [string, 'null'], format: date-time }
+        actual_frequency:
+          type: number
+          description: 系統周波数（メンバー間で同一、VPP top-level には合算しない）
+        components:
+          type: array
+          description: |
+            詳細 /status/details かつ ?include_components=true 指定時のみ返却（multi_component メンバー、v1.3）。
+            各要素は物理 EMS API §9.2.2 の components[] と同一定義
+            （component_id / component_type / status + active_power / capacity / resource_state ブロックのサブセット）。
+          items:
+            type: object
+            required: [component_id, component_type]
+            properties:
+              component_id: { type: string }
+              component_type: { type: string, enum: [battery, generator, consumer] }
+              status: { type: integer, enum: [0, 9] }
+              active_power: { type: object, description: current_kw（受電+/送電-）等の kW 系ブロック }
+              capacity: { type: object, description: import/export_energy_available 等 }
+              resource_state: { type: object, description: soc / irradiance_w_m2 / dr 系等 }
+
+    VppStatusResponse:
+      type: object
+      required: [vpp_id, status, current_kw, baseline_kw, delta_kw, dispatched_delta_kw, has_warning, members, timestamp]
+      description: |
+        概要（フラット構造）。top-level は配下 in_service メンバーの稼働中合算（VPP 内に保管しない派生値）。
+        baseline_kw / delta_kw / dispatched_delta_kw は v1.2 で概要にも含める（応動乖離の一覧監視 KPI）。
+      properties:
+        vpp_id: { type: string }
+        status: { type: integer, enum: [0, 9] }
+        fcr_active: { type: integer, enum: [0, 1] }
+        dr_active: { type: integer, enum: [0, 1] }
+        current_kw: { type: [number, 'null'], description: '計測欠損時は null' }
+        baseline_kw: { type: number }
+        delta_kw: { type: [number, 'null'] }
+        dispatched_delta_kw: { type: [number, 'null'] }
+        import_energy_available: { type: number }
+        export_energy_available: { type: number }
+        import_power_available: { type: number }
+        export_power_available: { type: number }
+        has_warning: { type: integer, enum: [0, 1] }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/VppMemberStatus' }
+        timestamp: { type: string, format: date-time }
+
+    VppStatusDetailsBlocks:
+      type: object
+      properties:
+        active_power:
+          type: object
+          properties:
+            current_kw: { type: [number, 'null'], description: '計測欠損時は null' }
+            baseline_kw: { type: number }
+            delta_kw: { type: [number, 'null'] }
+            dispatched_delta_kw: { type: [number, 'null'] }
+            fcr_active: { type: integer, enum: [0, 1] }
+            fcr_response_kw: { type: [number, 'null'] }
+            compound_breakdown: { $ref: '#/components/schemas/CompoundBreakdown' }
+            active_sku:
+              type: [string, 'null']
+              description: 'VPP 集約。全 in_service メンバー一致時のみ当該値、不一致時 "mixed"、全 null なら null'
+        capacity:
+          type: object
+          properties:
+            import_energy_available: { type: [number, 'null'] }
+            export_energy_available: { type: [number, 'null'] }
+            import_power_available: { type: number }
+            export_power_available: { type: number }
+        resource_state:
+          type: object
+          properties:
+            dr_active: { type: integer, enum: [0, 1] }
+            dr_target_reduction_kw: { type: [number, 'null'] }
+            dr_actual_reduction_kw: { type: [number, 'null'] }
+            soc: { type: [number, 'null'] }
+            irradiance_w_m2: { type: [number, 'null'] }
+            output_control_reason: { type: [string, 'null'] }
+
+    VppStatusDetailsResponse:
+      allOf:
+        - type: object
+          required: [vpp_id, status, has_warning, members, timestamp]
+          properties:
+            vpp_id: { type: string }
+            status: { type: integer, enum: [0, 9] }
+            active_sku:
+              type: [string, 'null']
+              description: 'VPP 集約。全 in_service メンバー一致時のみ当該値、不一致時 "mixed"、全 null なら null'
+            has_warning: { type: integer, enum: [0, 1] }
+            members:
+              type: array
+              items: { $ref: '#/components/schemas/VppMemberStatus' }
+            timestamp: { type: string, format: date-time }
+        - $ref: '#/components/schemas/VppStatusDetailsBlocks'
+
+    # ========== /control/active_power ==========
+
+    MemberBaseline:
+      type: object
+      required: [ems_id, baseline_kw]
+      properties:
+        ems_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+        baseline_kw:
+          type: number
+          minimum: -999999.9
+          maximum: 999999.9
+          description: |
+            指令時の按分計算用ベースライン電力。consumer メンバーは物理 EMS /baseline の該当 30 分スロット値、
+            generator / battery はアグリの運転計画値。DR 履行精算には使用されない（精算は物理 EMS /baseline で完結）。
+
+    VppControlActivePowerRequest:
+      type: object
+      required: [type, member_baselines]
+      properties:
+        type:
+          type: string
+          enum: [immediate, schedule]
+        delta_kw:
+          type: number
+          minimum: -999999.9
+          maximum: 999999.9
+          description: |
+            VPP 全体への電力変化量。FCR 以外で必須、FCR では指定不可。
+            合計利用可能電力超過チェックは type=immediate のみ（schedule は実行時にクリップし uncovered_kw に積算）。
+        fcr_response_kw:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'FCR で必須、それ以外は compound に FCR を含む場合のみ指定可'
+        compound_breakdown:
+          $ref: '#/components/schemas/CompoundBreakdown'
+        duration_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: 'type=immediate で必須'
+        start_time:
+          type: string
+          format: date-time
+          description: 'type=schedule で必須'
+        end_time:
+          type: string
+          format: date-time
+          description: 'type=schedule で必須'
+        sku:
+          $ref: '#/components/schemas/Sku'
+        member_baselines:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/MemberBaseline' }
+          description: |
+            全 in_service メンバー分の baseline_kw を必須指定。type=schedule では実行時に
+            in_service 復帰しうるメンバーを含め全登録メンバー分の指定を推奨（未指定で復帰した
+            メンバーは skipped_baseline_missing）。未登録 ems_id 混入時は 400 member_baselines_unknown_ems。
+
+    VppDispatchedMember:
+      type: object
+      required: [ems_id, allocation_weight, baseline_kw, dispatch_status]
+      properties:
+        ems_id: { type: string }
+        label: { type: string }
+        allocation_weight: { type: number }
+        baseline_kw:
+          type: number
+          description: 今回の指令で使用したベースライン電力値。スキップ時も返す（決済・計量用途）
+        delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          oneOf:
+            - $ref: '#/components/schemas/CompoundBreakdown'
+            - type: 'null'
+        dispatch_status: { $ref: '#/components/schemas/DispatchStatus' }
+        skip_reason:
+          type: [string, 'null']
+          description: |
+            skipped_incompatible / failed 時の詳細。物理 EMS API の error_type
+            （sku_not_marketable / dr_cooldown_active / baseline_not_configured /
+            reverse_power_flow_forbidden 等）または delivery_failed を格納。それ以外は null。
+
+    VppAffectedSchedule:
+      type: object
+      required: [schedule_id, action, start_time, end_time]
+      properties:
+        schedule_id: { type: string }
+        action:
+          type: string
+          enum: [created, inherited, split, deleted]
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+
+    VppControlActivePowerResponse:
+      type: object
+      required: [vpp_id, control_type, sku, members, timestamp]
+      properties:
+        vpp_id: { type: string }
+        message: { type: string }
+        control_type:
+          type: string
+          enum: [immediate, schedule]
+        delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          oneOf:
+            - $ref: '#/components/schemas/CompoundBreakdown'
+            - type: 'null'
+        uncovered_kw:
+          type: number
+          description: 能力超過等で配分できなかった電力量
+        sku: { $ref: '#/components/schemas/Sku' }
+        duration_minutes: { type: [integer, 'null'] }
+        schedule_id: { type: [string, 'null'] }
+        start_time: { type: [string, 'null'], format: date-time }
+        end_time: { type: [string, 'null'], format: date-time }
+        affected_schedules:
+          type: array
+          items: { $ref: '#/components/schemas/VppAffectedSchedule' }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/VppDispatchedMember' }
+        timestamp: { type: string, format: date-time }
+
+    # ========== /control/active_power/schedules GET ==========
+
+    VppScheduleItem:
+      type: object
+      required: [schedule_id, control_type, sku, start_time, end_time, created_at, members]
+      properties:
+        schedule_id: { type: string }
+        control_type:
+          type: string
+          enum: [schedule]
+        delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          oneOf:
+            - $ref: '#/components/schemas/CompoundBreakdown'
+            - type: 'null'
+        sku: { $ref: '#/components/schemas/Sku' }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        uncovered_kw: { type: number }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/VppDispatchedMember' }
+
+    VppSchedulesListResponse:
+      type: object
+      required: [vpp_id, schedules, timestamp]
+      properties:
+        vpp_id: { type: string }
+        schedules:
+          type: array
+          items: { $ref: '#/components/schemas/VppScheduleItem' }
+        timestamp: { type: string, format: date-time }
+
+    # ========== /measurements ==========
+
+    MeasurementsActivePowerRequest:
+      type: object
+      required: [start_time, end_time]
+      properties:
+        request_id: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds:
+          type: integer
+          enum: [1, 60, 1800, 3600, 86400]
+          default: 60
+          description: |
+            サンプリング間隔（秒）。5 値のみ指定可（それ以外は 400 invalid_parameter、v1.3 で離散化）。
+            物理 EMS API §9.7 と同一。
+        ems_ids:
+          type: array
+          items:
+            type: string
+            pattern: '^[0-9a-f]{32}$'
+          description: |
+            取得対象メンバーの絞り込み（省略時は全登録メンバー）。複合上限
+            （ポイント数 × 取得対象メンバー数 ≤ 446,400）も指定メンバー数で評価。
+        include_components:
+          type: boolean
+          default: false
+          description: |
+            true 指定時、multi_component メンバーの members[] 要素に components[]（component 個別値）を返却（v1.3）。
+            複合上限の評価に component 数は乗算しない。レスポンスサイズが component 数に比例して増加するため
+            ems_ids 絞り込みの併用を推奨。
+
+    VppMemberActivePowerSample:
+      type: object
+      required: [ems_id]
+      properties:
+        ems_id: { type: string }
+        current_kw: { type: [number, 'null'], description: '計測欠損時は null' }
+        baseline_kw: { type: number }
+        delta_kw: { type: [number, 'null'] }
+        dispatched_delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          oneOf:
+            - $ref: '#/components/schemas/CompoundBreakdown'
+            - type: 'null'
+        output_control_limit: { type: [integer, 'null'] }
+        soc: { type: [number, 'null'] }
+        irradiance_w_m2: { type: [number, 'null'] }
+        dr_active: { type: [integer, 'null'] }
+        dr_target_reduction_kw: { type: [number, 'null'] }
+        dr_actual_reduction_kw: { type: [number, 'null'] }
+        active_sku: { type: [string, 'null'] }
+        actual_frequency: { type: number }
+        components:
+          type: array
+          description: |
+            include_components: true 指定時のみ返却（multi_component メンバー、v1.3）。
+            フィールド定義は物理 EMS API §9.7 の components[] に準拠（下記 properties は主要フィールドの例示サブセット。
+            蓄電池の充放電電力・PV の発電電力は current_kw の符号（受電+/送電-）で判別）。
+          items:
+            type: object
+            required: [component_id, component_type]
+            properties:
+              component_id: { type: string }
+              component_type: { type: string, enum: [battery, generator, consumer] }
+              current_kw: { type: [number, 'null'] }
+              baseline_kw: { type: number }
+              delta_kw: { type: [number, 'null'] }
+              soc: { type: [number, 'null'] }
+              irradiance_w_m2: { type: [number, 'null'] }
+              output_control_limit: { type: [integer, 'null'] }
+
+    VppActivePowerDataPoint:
+      type: object
+      required: [timestamp, members]
+      properties:
+        timestamp: { type: string, format: date-time }
+        current_kw:
+          type: number
+          description: 配下 in_service メンバーの合算
+        baseline_kw: { type: number }
+        delta_kw: { type: [number, 'null'] }
+        dispatched_delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          oneOf:
+            - $ref: '#/components/schemas/CompoundBreakdown'
+            - type: 'null'
+        active_sku:
+          type: [string, 'null']
+          description: 'VPP 集約。全 in_service メンバー一致時のみ当該値、不一致時 "mixed"、全 null なら null'
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/VppMemberActivePowerSample' }
+
+    VppMeasurementsActivePowerResponse:
+      type: object
+      required: [vpp_id, start_time, end_time, interval_seconds, data, timestamp]
+      properties:
+        vpp_id: { type: string }
+        request_id: { type: [string, 'null'] }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/VppActivePowerDataPoint' }
+        timestamp: { type: string, format: date-time }
+
+    MeasurementsEnergyRequest:
+      type: object
+      required: [start_time, end_time]
+      properties:
+        request_id: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds:
+          type: integer
+          enum: [1800, 3600, 86400]
+          description: |
+            集計粒度（秒）。3 値のみ指定可（それ以外は 400 invalid_parameter、v1.3 追加）。
+            省略時は期間全体を 1 レコードとして data[] に返却。
+            区切りは start_time 起点、最終レコードは end_time で打ち切り（物理 EMS API §9.8 と同一。
+            精算コマ突合時は 30 分境界起点を推奨）。
+        ems_ids:
+          type: array
+          items:
+            type: string
+            pattern: '^[0-9a-f]{32}$'
+          description: |
+            取得対象メンバーの絞り込み（省略時は全登録メンバー、v1.3 追加）。複合上限
+            （レコード数 × 取得対象メンバー数 ≤ 44,640）も指定メンバー数で評価。
+        include_components:
+          type: boolean
+          default: false
+          description: |
+            true 指定時、multi_component メンバーの members[] 要素に components[]
+            （経路追跡フィールドを含む component 個別値）を返却（v1.3）。
+            複合上限の評価に component 数は乗算しない。
+
+    VppMemberEnergyValues:
+      type: object
+      required: [ems_id]
+      description: |
+        data[] 各レコード内のメンバー別集計値（値は当該レコードの集計区間の集計値）。
+        メンバー別イベント系（dr_dispatched_count / dr_total_dispatched_minutes）は v1.3 で廃止
+        （イベント系は top-level 期間サマリのみ。メンバー別はアグリゲーターの指令履歴から導出）。
+      properties:
+        ems_id: { type: string }
+        import_kwh: { type: number, minimum: 0 }
+        export_kwh: { type: number, minimum: 0 }
+        baseline_kwh: { type: number }
+        self_consumed_kwh: { type: number, minimum: 0 }
+        fit_export_kwh:
+          type: number
+          minimum: 0
+          description: FIT 区分の generator / FIT 区分 generator component を含むサイト（multi_component は v1.3 で解禁）
+        fip_export_kwh:
+          type: number
+          minimum: 0
+          description: FIP 区分の generator / FIP 区分 generator component を含むサイト（同上。generator → 連系点直接送電分）
+        non_subsidized_export_kwh:
+          type: number
+          minimum: 0
+          description: non_subsidized 区分の generator / 同区分 generator component を含むサイト（同上）
+        curtailed_kwh: { type: number, minimum: 0 }
+        fit_curtailed_kwh: { type: number, minimum: 0 }
+        non_firm_curtailed_kwh: { type: number, minimum: 0 }
+        manual_curtailed_kwh: { type: number, minimum: 0 }
+        imbalance_kwh: { type: number }
+        dr_delivered_kwh: { type: number, minimum: 0 }
+        components:
+          type: array
+          description: |
+            include_components: true 指定時のみ返却（multi_component メンバー、v1.3）。
+            フィールド定義は物理 EMS API §9.8 の components[] に準拠（下記 properties は主要フィールドの例示サブセット。
+            battery の経路追跡 from_generator_kwh / from_grid_kwh / to_grid_kwh / to_load_kwh、
+            generator の to_battery_kwh / to_load_kwh / 助成区分別送電量を含む）。
+          items:
+            type: object
+            required: [component_id, component_type]
+            properties:
+              component_id: { type: string }
+              component_type: { type: string, enum: [battery, generator, consumer] }
+              import_kwh: { type: number, minimum: 0 }
+              export_kwh: { type: number, minimum: 0 }
+              from_generator_kwh: { type: number, minimum: 0 }
+              from_grid_kwh: { type: number, minimum: 0 }
+              to_grid_kwh: { type: number, minimum: 0 }
+              to_load_kwh: { type: number, minimum: 0 }
+              to_battery_kwh: { type: number, minimum: 0 }
+              fip_export_kwh: { type: number, minimum: 0 }
+              fit_export_kwh: { type: number, minimum: 0 }
+              non_subsidized_export_kwh: { type: number, minimum: 0 }
+              curtailed_kwh: { type: number, minimum: 0 }
+              consumption_kwh: { type: number, minimum: 0 }
+              dr_delivered_kwh: { type: number, minimum: 0 }
+
+    VppEnergyDataRecord:
+      type: object
+      required: [start_time, end_time, members]
+      description: 各レコード = 集計区間 + kWh 系集計値 + members[]（§8.1 の data[] と同型構造）
+      properties:
+        start_time:
+          type: string
+          format: date-time
+          description: 当該レコードの集計区間開始
+        end_time:
+          type: string
+          format: date-time
+          description: 集計区間終了（最終レコードのみ端数期間になり得る）
+        # 集計値（配下 in_service メンバーの当該区間合算）
+        import_kwh: { type: number, minimum: 0 }
+        export_kwh: { type: number, minimum: 0 }
+        self_consumed_kwh: { type: number, minimum: 0 }
+        dr_delivered_kwh: { type: number, minimum: 0 }
+        curtailed_kwh: { type: number, minimum: 0 }
+        imbalance_kwh: { type: number }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/VppMemberEnergyValues' }
+
+    VppMeasurementsEnergyResponse:
+      type: object
+      required: [vpp_id, start_time, end_time, data, timestamp]
+      description: |
+        レスポンスは常に data[] 配列（v1.3 で §8.1 / 物理 EMS API §9.8 と統一）。
+        interval_seconds 省略時は期間全体を 1 レコードとして data[] に格納。
+        省略時の各 kWh フィールド値 = 同一期間を interval_seconds 指定で取得した Σ data[]（集計整合性保証）。
+        計測欠損・out_of_service 時間帯は 0 として集計され、data[] は欠損スキップなく全区間分を返却
+        （§8.1 の欠損スキップ方式とは異なる）。
+        イベント系（dr_dispatched_count / dr_total_dispatched_minutes）は期間サマリとして top-level のみ。
+      properties:
+        vpp_id: { type: string }
+        request_id: { type: [string, 'null'] }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds:
+          type: integer
+          description: リクエストで指定した場合のみ返却（指定値のエコーバック。省略時は非返却）
+        dr_dispatched_count:
+          type: integer
+          minimum: 0
+          description: VPP 指令の発動回数（メンバー別の和ではない）。期間サマリ、top-level のみ
+        dr_total_dispatched_minutes:
+          type: integer
+          minimum: 0
+          description: 全メンバーの DR 発動合計時間の合計。期間サマリ、top-level のみ
+        data:
+          type: array
+          maxItems: 1488
+          items: { $ref: '#/components/schemas/VppEnergyDataRecord' }
+          description: |
+            省略時 1 件 / interval_seconds 指定時は最大 1,488 件（31 日 × 48 コマ）。
+            複合上限: レコード数 × 取得対象メンバー数 ≤ 44,640（超過時 410 data_points_exceeded）。
+        timestamp: { type: string, format: date-time }
+
+    # ========== エラー ==========
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer }
+        message: { type: string }
+        details: { type: string }
+        error_type:
+          type: string
+          enum:
+            - authentication_error
+            - token_expired
+            - permission_denied
+            - rate_limit_exceeded
+            - invalid_parameter
+            - period_too_long
+            - data_points_exceeded
+            - data_not_available
+            - schedule_query_out_of_range
+            - schedule_not_found
+            - schedule_not_deletable
+            - schedule_split_too_narrow
+            - ems_not_found
+            - ems_already_registered
+            - ems_registered_to_other_vpp
+            - member_limit_exceeded
+            - member_not_found
+            - member_baselines_required
+            - member_baselines_incomplete
+            - member_baselines_duplicate
+            - member_baselines_unknown_ems
+            - invalid_resource_type
+            - resource_type_mismatch
+            - vpp_not_found
+            - no_dispatchable_members
+            - idempotency_conflict
+            - delta_kw_required
+            - delta_kw_not_allowed_for_fcr
+            - fcr_response_kw_required
+            - fcr_response_kw_not_allowed
+            - fcr_response_kw_must_be_positive
+            - compound_breakdown_not_allowed
+            - compound_breakdown_max_mismatch
+            - compound_breakdown_value_exceeds_total
+            - compound_breakdown_invalid_key
+            - compound_breakdown_sign_mismatch
+        parameter: { type: string }
+        received_value: {}
+        valid_range: { type: string }
+        required_action: { type: string }
+        limit: { type: integer }
+        remaining: { type: integer }
+        reset_time: { type: string, format: date-time }
+        retry_after: { type: integer }
+        schedule_id: { type: string }
+        idempotency_key: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [error, timestamp]
+      properties:
+        vpp_id: { type: string }
+        ems_id: { type: string }
+        error: { $ref: '#/components/schemas/Error' }
+        timestamp: { type: string, format: date-time }
+
+  responses:
+    BadRequest:
+      description: 400 リクエスト不正
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: 401 認証失敗（JWT 不正・Refresh Token 不正）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TokenExpired:
+      description: 498 Access Token 期限切れ（`/auth/refresh` で再取得）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: 403 アクセス権限不足
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: 404 データなし／非対応／未登録
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: 409 削除不可／重複応動／冪等キー競合
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Gone:
+      description: 410 データ量制限超過
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TooManyRequests:
+      description: 429 レートリミット超過（参照系 1000 回/h・制御系 200 回/h の独立バケット、VPP ID 単位）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: 503 分配可能メンバーなし／システム故障
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }

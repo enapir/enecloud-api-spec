@@ -1,0 +1,1141 @@
+openapi: 3.1.0
+info:
+  title: ENECloud EMS OpenAPI
+  version: "2.2"
+  description: |
+    物理 EMS API。1 サイト = 1 連系点単位の制御・計測・スケジュール管理 API。
+    複数 EMS を束ねる場合は VPP API を併用する（推奨、VPP API v1.3 と一体運用）。
+
+    v2.2 主要変更（非互換変更あり）:
+    /measurements/energy のレスポンスを常に data[] 配列に統一（省略時は期間全体 1 レコード、
+    kWh 系フィールドの top-level 直接配置を廃止。イベント系のみ top-level 期間サマリ）、
+    interval_seconds（1800 / 3600 / 86400 の 3 値）によるコマ別・日次の時系列取得を追加、
+    /measurements/active_power の interval_seconds を 1 / 60 / 1800 / 3600 / 86400 の 5 値に離散化
+    （従来の 1〜3600 自由値から変更）。
+
+    v2.1 主要変更: jepx-da ⇄ jepx-ttv を同一 kWh ディスパッチカテゴリとして後勝ち上書き、
+    スケジュール取得範囲を未来 90 日に拡大、実行中スケジュールへの上書き POST 可、
+    履歴系エラー（data_not_available / period_too_long / data_points_exceeded）の明示。
+  contact:
+    name: 株式会社ナピル
+  license:
+    name: CC BY 4.0
+    url: https://creativecommons.org/licenses/by/4.0/
+
+servers:
+  - url: '{baseUrl}'
+    description: |
+      Base URL（本番／テスト環境のホスト名）は公開仕様には含めません。
+      ご契約時に個別提供される値を baseUrl に設定してください。
+    variables:
+      baseUrl:
+        default: 'https://HOST'
+        description: 契約時に個別提供される Base URL（例 https://HOST）
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: 認証
+  - name: Status
+    description: リアルタイム状態取得
+  - name: Specifications
+    description: 仕様情報
+  - name: Control
+    description: 有効電力制御
+  - name: Schedules
+    description: スケジュール管理
+  - name: Baseline
+    description: ベースライン管理（30 分粒度 CBL）
+  - name: Measurements
+    description: 履歴 API
+  - name: ServicePlan
+    description: 運転計画
+
+paths:
+
+  /auth/refresh:
+    post:
+      operationId: refreshAccessToken
+      tags: [Auth]
+      summary: Access Token 取得
+      description: |
+        Refresh Token を Authorization ヘッダーで送信し、Access Token を取得
+
+        注: 認証エンドポイントは API 本体とは別ホストで提供される。
+        各ホストの Base URL は契約時に個別提供する。
+      security:
+        - refreshAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/ems/{ems_id}/status:
+    get:
+      operationId: getStatus
+      tags: [Status]
+      summary: リアルタイム状態取得（概要）
+      description: 一覧監視・ダッシュボード用の最小フィールドを返却
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v2/ems/{ems_id}/status/details:
+    get:
+      operationId: getStatusDetails
+      tags: [Status]
+      summary: リアルタイム状態取得（詳細）
+      description: 精算・履行評価用にブロック構造で全フィールドを返却
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusDetailsResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v2/ems/{ems_id}/specifications:
+    get:
+      operationId: getSpecifications
+      tags: [Specifications]
+      summary: 仕様情報取得
+      description: サイトの静的仕様属性（site_capability / site_constraints / components）を取得
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecificationsResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v2/ems/{ems_id}/control/active_power:
+    post:
+      operationId: controlActivePower
+      tags: [Control]
+      summary: 有効電力制御（即座/スケジュール）
+      description: |
+        即座指示（immediate）またはスケジュール登録（schedule）。
+        SKU により必須パラメータが異なる（FCR は fcr_response_kw 必須、それ以外は delta_kw 必須）。
+
+        スケジュール重複は後勝ちルール（§9.5.1）。jepx-da ⇄ jepx-ttv は同一 kWh ディスパッチ
+        カテゴリとして上書き。実行中スケジュールへの上書き POST も可能（DELETE の 409 制約とは独立）。
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControlActivePowerRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlActivePowerResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/PreconditionFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v2/ems/{ems_id}/control/active_power/schedules:
+    get:
+      operationId: listActivePowerSchedules
+      tags: [Schedules]
+      summary: スケジュール一覧取得
+      description: 取得範囲は過去 30 日 〜 未来 90 日（start_time 基準、登録可能範囲と一致）
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+        - name: start_time_from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: start_time_to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulesListResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+    delete:
+      operationId: deleteActivePowerSchedule
+      tags: [Schedules]
+      summary: スケジュール削除
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+        - name: schedule_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteSuccessResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /v2/ems/{ems_id}/baseline:
+    post:
+      operationId: registerBaseline
+      tags: [Baseline]
+      summary: ベースライン値登録（30 分粒度、一括）
+      description: |
+        consumer component を含むサイトの DR 履行評価用ベースライン値（30 分粒度、kW）を登録。
+        UTC で 00 分 / 30 分境界に必須アライン。バルク上限 336 件（1 週間分）。
+        後勝ち上書き、当日調整は 5h〜2h 前の 6 コマを再 POST。
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BaselinePostRequest'
+      responses:
+        '200':
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaselinePostResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/PreconditionFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    get:
+      operationId: getBaseline
+      tags: [Baseline]
+      summary: ベースライン値取得
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+        - name: start_time
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+          description: 30 分境界（UTC）
+        - name: end_time
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+          description: 30 分境界（UTC）、最大 7 日後
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaselineGetResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /v2/ems/{ems_id}/measurements/active_power:
+    post:
+      operationId: getActivePowerMeasurements
+      tags: [Measurements]
+      summary: 瞬時電力履歴取得
+      description: |
+        保管 60 日 / interval_seconds は 1・60・1800・3600・86400 の 5 値のみ（デフォルト 60、v2.2 で離散化）/
+        取得期間最大 31 日 / 最大時系列ポイント数 44,640 件
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeasurementsActivePowerRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasurementsActivePowerResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /v2/ems/{ems_id}/measurements/energy:
+    post:
+      operationId: getEnergyMeasurements
+      tags: [Measurements]
+      summary: 電力量履歴取得
+      description: |
+        保管 12 か月（365 日）/ 最小取得期間 60 秒 / 最大取得期間 31 日。
+        レスポンスは常に data[] 配列（v2.2 で /measurements/active_power と統一、非互換変更）。
+        interval_seconds 省略時は期間全体を 1 レコード、1800 / 3600 / 86400 指定で
+        コマ別・時間別・日次の複数レコード（最大 1,488 件 = 31 日 × 48 コマ）。
+        イベント系（dr_dispatched_count / dr_total_dispatched_minutes）は期間サマリとして top-level のみ。
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeasurementsEnergyRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasurementsEnergyResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /v2/ems/{ems_id}/serviceplan:
+    get:
+      operationId: getServicePlan
+      tags: [ServicePlan]
+      summary: 運転計画取得（30 分 × 48 件 = 24 時間分）
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+        - name: start_time
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServicePlanResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT (Access Token)
+    refreshAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT (Refresh Token)
+
+  parameters:
+    EmsIdPath:
+      name: ems_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
+        example: a1b2c3d4e5f6789012345678901234ab
+      description: EMS 識別子（16 バイト UUID = 32 文字 hex、ハイフン無し）
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+      description: 冪等性キー（24 時間保持）
+
+  schemas:
+
+    AuthResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        expires_in: { type: integer, description: 秒 }
+
+    DeleteSuccessResponse:
+      type: object
+      required: [message, timestamp]
+      properties:
+        ems_id: { type: string }
+        message: { type: string, example: 'Schedule deleted successfully' }
+        schedule_id: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    # ========== Component / Site 構造 ==========
+
+    Component:
+      type: object
+      required: [component_id, component_type]
+      properties:
+        component_id: { type: string, example: bat-1 }
+        component_type:
+          type: string
+          enum: [battery, generator, consumer]
+        generator_kind:
+          type: string
+          enum: [thermal, pumped_storage, biomass, hydro, pv, wind, other]
+          description: generator のみ
+        rated_cap: { type: number, description: 'battery 定格容量 (kWh)' }
+        rated_output_kw: { type: number, description: 'generator 定格出力 (kW)' }
+        min_output_kw: { type: number, description: 'generator 最低出力 (kW)' }
+        import_pwr_max: { type: number }
+        export_pwr_max: { type: number }
+        soc_op_max: { type: number, minimum: 0, maximum: 100 }
+        soc_op_min: { type: number, minimum: 0, maximum: 100 }
+        contract_kw: { type: number, description: 'consumer 契約電力 (kW)' }
+        max_dr_reduction_kw: { type: number }
+        min_dr_reduction_kw: { type: number }
+        min_dr_duration_minutes: { type: integer }
+        min_dr_cooldown_minutes: { type: integer }
+        fcr_capable: { type: boolean }
+        dr_capable: { type: boolean }
+
+    SiteCapability:
+      type: object
+      properties:
+        adjustable: { type: boolean }
+        fcr_capable: { type: boolean }
+        dr_capable: { type: boolean }
+        reverse_flow_allowed: { type: boolean }
+        balancing_responsible: { type: boolean }
+        non_firm_connection: { type: boolean }
+        marketable:
+          type: array
+          items:
+            type: string
+            enum: [fcr, s-frr, frr, rr, rr-fit, compound, jepx-da, jepx-ttv, negawatt-spot]
+
+    SiteConstraints:
+      type: object
+      properties:
+        voltage_class:
+          type: string
+          enum: [low, high, extra_high]
+        measurement_point:
+          type: string
+          enum: [grid, device]
+        site_import_max_kw: { type: number, minimum: 0 }
+        site_export_max_kw: { type: number, minimum: 0 }
+
+    # ========== /specifications ==========
+
+    SpecificationsResponse:
+      type: object
+      required: [ems_id, site_capability, site_constraints, components, timestamp]
+      properties:
+        ems_id: { type: string }
+        site_capability: { $ref: '#/components/schemas/SiteCapability' }
+        site_constraints: { $ref: '#/components/schemas/SiteConstraints' }
+        components:
+          type: array
+          items: { $ref: '#/components/schemas/Component' }
+          minItems: 1
+          maxItems: 50
+        timestamp: { type: string, format: date-time }
+
+    # ========== /status, /status/details ==========
+
+    StatusValues:
+      type: object
+      description: status 共通値フィールド（site レベル / component レベル両方で使用）
+      properties:
+        status: { type: integer, enum: [0, 9], description: '0: in_service, 9: out_of_service' }
+        current_kw: { type: [number, 'null'], description: '計測欠損時は null' }
+        baseline_kw: { type: number }
+        delta_kw: { type: [number, 'null'] }
+        dispatched_delta_kw: { type: [number, 'null'] }
+        fcr_active: { type: integer, enum: [0, 1] }
+        dr_active: { type: [integer, 'null'], enum: [0, 1, null] }
+        import_power_available: { type: number }
+        export_power_available: { type: number }
+        import_energy_available: { type: [number, 'null'] }
+        export_energy_available: { type: [number, 'null'] }
+        output_control_limit: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        has_warning: { type: integer, enum: [0, 1] }
+        measure_timestamp: { type: [string, 'null'], format: date-time }
+
+    ComponentStatus:
+      allOf:
+        - type: object
+          required: [component_id, component_type]
+          properties:
+            component_id: { type: string }
+            component_type:
+              type: string
+              enum: [battery, generator, consumer]
+        - $ref: '#/components/schemas/StatusValues'
+
+    StatusResponse:
+      allOf:
+        - type: object
+          required: [ems_id, status, current_kw, baseline_kw, delta_kw, dispatched_delta_kw, fcr_active, has_warning, measure_timestamp, timestamp]
+          properties:
+            ems_id: { type: string }
+            timestamp: { type: string, format: date-time }
+            components:
+              type: array
+              items: { $ref: '#/components/schemas/ComponentStatus' }
+              description: 'components.length ≥ 2 のサイトのみ返却（component ごとの個別状態）'
+        - $ref: '#/components/schemas/StatusValues'
+
+    StatusDetailsBlocks:
+      type: object
+      properties:
+        active_power:
+          type: object
+          properties:
+            current_kw: { type: [number, 'null'], description: '計測欠損時は null' }
+            baseline_kw: { type: number }
+            delta_kw: { type: [number, 'null'] }
+            dispatched_delta_kw: { type: [number, 'null'] }
+            fcr_active: { type: integer, enum: [0, 1] }
+            fcr_response_kw: { type: [number, 'null'] }
+            compound_breakdown:
+              type: [object, 'null']
+              additionalProperties: { type: number }
+            active_sku: { type: [string, 'null'] }
+            output_control_limit: { type: [integer, 'null'] }
+            output_control_reason:
+              type: [string, 'null']
+              enum: [fit_curtailment, non_firm_congestion, manual, other, null]
+        reactive_power:
+          type: object
+          description: 将来枠（v2.2 現在も未返却）
+        tso_dispatch_detail:
+          type: object
+          description: 将来枠（v2.2 現在も未返却）
+        capacity:
+          type: object
+          properties:
+            import_energy_available: { type: [number, 'null'] }
+            export_energy_available: { type: [number, 'null'] }
+            import_power_available: { type: number }
+            export_power_available: { type: number }
+        resource_state:
+          type: object
+          properties:
+            soc: { type: [number, 'null'], minimum: 0, maximum: 100 }
+            dr_active: { type: [integer, 'null'], enum: [0, 1, null] }
+            dr_target_reduction_kw: { type: [number, 'null'] }
+            dr_actual_reduction_kw: { type: [number, 'null'] }
+            irradiance_w_m2: { type: [number, 'null'] }
+            actual_frequency: { type: number, description: 系統周波数 }
+
+    ComponentStatusDetails:
+      allOf:
+        - type: object
+          required: [component_id, component_type]
+          properties:
+            component_id: { type: string }
+            component_type:
+              type: string
+              enum: [battery, generator, consumer]
+        - $ref: '#/components/schemas/StatusDetailsBlocks'
+
+    StatusDetailsResponse:
+      allOf:
+        - type: object
+          required: [ems_id, status, has_warning, measure_timestamp, timestamp]
+          properties:
+            ems_id: { type: string }
+            status: { type: integer, enum: [0, 9] }
+            active_sku: { type: [string, 'null'] }
+            last_dispatch_status:
+              type: [string, 'null']
+              enum: [dispatched, skipped_out_of_service, skipped_incompatible, pending]
+              description: 'VPP API では追加値（skipped_weight_zero / skipped_baseline_missing / failed）が定義される'
+            has_warning: { type: integer, enum: [0, 1] }
+            measure_timestamp: { type: [string, 'null'], format: date-time }
+            timestamp: { type: string, format: date-time }
+            components:
+              type: array
+              items: { $ref: '#/components/schemas/ComponentStatusDetails' }
+              description: 'components.length ≥ 2 のサイトのみ返却（component ごとの個別状態、5 ブロック構造）'
+        - $ref: '#/components/schemas/StatusDetailsBlocks'
+
+    # ========== /control/active_power ==========
+
+    Sku:
+      type: string
+      enum: [fcr, s-frr, frr, rr, rr-fit, compound, jepx-da, jepx-ttv, negawatt-spot]
+
+    CompoundBreakdown:
+      type: object
+      description: |
+        複合商品の容量内訳。キーは fcr_response_kw / s-frr / frr / rr の 2 つ以上の組み合わせ。
+        内数ロジック: max(|各値|) = |delta_kw|
+      additionalProperties:
+        type: number
+
+    ControlActivePowerRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [immediate, schedule]
+        delta_kw:
+          type: number
+          minimum: -999999.9
+          maximum: 999999.9
+          description: 'FCR 以外で必須、FCR では指定不可。小数第 1 位まで'
+        fcr_response_kw:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'FCR で必須、FCR 以外では指定不可（compound 含む場合を除く）'
+        baseline_kw:
+          type: number
+          minimum: -999999.9
+          maximum: 999999.9
+        site_kw:
+          type: number
+          description: 'components.length ≥ 2 サイト用、サイトレベル目標電力'
+        component_id:
+          type: string
+          description: 'components.length ≥ 2 サイトで component 単位制御時'
+        compound_breakdown:
+          $ref: '#/components/schemas/CompoundBreakdown'
+        duration_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: 'type=immediate で必須'
+        start_time:
+          type: string
+          format: date-time
+          description: 'type=schedule で必須'
+        end_time:
+          type: string
+          format: date-time
+          description: 'type=schedule で必須'
+        sku:
+          $ref: '#/components/schemas/Sku'
+
+    AffectedSchedule:
+      type: object
+      required: [schedule_id, action, start_time, end_time]
+      properties:
+        schedule_id: { type: string }
+        action:
+          type: string
+          enum: [created, inherited, split, deleted]
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+
+    ControlActivePowerResponse:
+      type: object
+      required: [ems_id, control_type, timestamp]
+      properties:
+        ems_id: { type: string }
+        control_type:
+          type: string
+          enum: [immediate, schedule]
+        delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          $ref: '#/components/schemas/CompoundBreakdown'
+        baseline_kw: { type: number }
+        sku: { $ref: '#/components/schemas/Sku' }
+        duration_minutes: { type: [integer, 'null'] }
+        start_time: { type: [string, 'null'], format: date-time }
+        end_time: { type: [string, 'null'], format: date-time }
+        schedule_id: { type: [string, 'null'] }
+        affected_schedules:
+          type: array
+          items: { $ref: '#/components/schemas/AffectedSchedule' }
+        timestamp: { type: string, format: date-time }
+
+    # ========== /control/active_power/schedules GET ==========
+
+    ScheduleItem:
+      type: object
+      required: [schedule_id, start_time, end_time, sku, created_at]
+      properties:
+        schedule_id: { type: string }
+        scope:
+          type: string
+          enum: [site, component]
+        component_id: { type: [string, 'null'] }
+        component_type:
+          type: [string, 'null']
+          enum: [battery, generator, consumer, null]
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        site_kw: { type: [number, 'null'] }
+        delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          $ref: '#/components/schemas/CompoundBreakdown'
+        baseline_kw: { type: number }
+        sku: { $ref: '#/components/schemas/Sku' }
+        created_at: { type: string, format: date-time }
+
+    SchedulesListResponse:
+      type: object
+      required: [ems_id, schedules, timestamp]
+      properties:
+        ems_id: { type: string }
+        schedules:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleItem' }
+        timestamp: { type: string, format: date-time }
+
+    # ========== /baseline ==========
+
+    BaselineItem:
+      type: object
+      required: [start_time, end_time, baseline_kw]
+      properties:
+        start_time:
+          type: string
+          format: date-time
+          description: 30 分境界（UTC、00 分または 30 分）
+        end_time:
+          type: string
+          format: date-time
+          description: start_time + 30 分
+        baseline_kw:
+          type: number
+          minimum: 0
+          description: '0 ≤ baseline_kw ≤ contract_kw、小数第 1 位まで'
+        method_note:
+          type: string
+          maxLength: 64
+          description: '算定方式の自由記述メモ（例：High 4 of 5 (adj) 等）。精算には用いない'
+
+    BaselinePostRequest:
+      type: object
+      required: [ems_id, baselines]
+      properties:
+        ems_id: { type: string }
+        baselines:
+          type: array
+          minItems: 1
+          maxItems: 336
+          items: { $ref: '#/components/schemas/BaselineItem' }
+
+    BaselineRegistered:
+      allOf:
+        - $ref: '#/components/schemas/BaselineItem'
+        - type: object
+          required: [action]
+          properties:
+            action:
+              type: string
+              enum: [created, overwritten]
+
+    BaselinePostResponse:
+      type: object
+      required: [ems_id, registered, timestamp]
+      properties:
+        ems_id: { type: string }
+        registered:
+          type: array
+          items: { $ref: '#/components/schemas/BaselineRegistered' }
+        timestamp: { type: string, format: date-time }
+
+    BaselineStored:
+      allOf:
+        - $ref: '#/components/schemas/BaselineItem'
+        - type: object
+          properties:
+            registered_at: { type: string, format: date-time }
+
+    BaselineGetResponse:
+      type: object
+      required: [ems_id, baselines, timestamp]
+      properties:
+        ems_id: { type: string }
+        baselines:
+          type: array
+          items: { $ref: '#/components/schemas/BaselineStored' }
+          description: 未登録スロットは含まれない（欠損扱い）
+        timestamp: { type: string, format: date-time }
+
+    # ========== /measurements/active_power ==========
+
+    MeasurementsActivePowerRequest:
+      type: object
+      required: [start_time, end_time]
+      properties:
+        request_id: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds:
+          type: integer
+          enum: [1, 60, 1800, 3600, 86400]
+          default: 60
+          description: |
+            サンプリング間隔（秒）。5 値のみ指定可（それ以外は 400 invalid_parameter、v2.2 で離散化）。
+            瞬時値のサンプリング間隔であり、/measurements/energy の集計粒度とは意味が異なる。
+
+    ActivePowerValues:
+      type: object
+      description: 瞬時電力履歴の値フィールド（site レベル / component レベル両方で使用）
+      properties:
+        current_kw: { type: [number, 'null'], description: '計測欠損時は null' }
+        baseline_kw: { type: number }
+        delta_kw: { type: [number, 'null'] }
+        dispatched_delta_kw: { type: [number, 'null'] }
+        fcr_response_kw: { type: [number, 'null'] }
+        compound_breakdown:
+          $ref: '#/components/schemas/CompoundBreakdown'
+        soc: { type: [number, 'null'] }
+        irradiance_w_m2: { type: [number, 'null'] }
+        dr_active: { type: [integer, 'null'] }
+        dr_target_reduction_kw: { type: [number, 'null'] }
+        dr_actual_reduction_kw: { type: [number, 'null'] }
+        active_sku: { type: [string, 'null'] }
+        output_control_limit: { type: [integer, 'null'] }
+        actual_frequency: { type: number, description: 系統周波数 }
+
+    ComponentActivePowerSample:
+      allOf:
+        - type: object
+          required: [component_id, component_type]
+          properties:
+            component_id: { type: string }
+            component_type:
+              type: string
+              enum: [battery, generator, consumer]
+        - $ref: '#/components/schemas/ActivePowerValues'
+
+    ActivePowerDataPoint:
+      allOf:
+        - type: object
+          required: [timestamp]
+          properties:
+            timestamp: { type: string, format: date-time }
+            components:
+              type: array
+              items: { $ref: '#/components/schemas/ComponentActivePowerSample' }
+              description: 'components.length ≥ 2 のサイトのみ返却'
+        - $ref: '#/components/schemas/ActivePowerValues'
+
+    MeasurementsActivePowerResponse:
+      type: object
+      required: [ems_id, start_time, end_time, interval_seconds, data, timestamp]
+      properties:
+        ems_id: { type: string }
+        request_id: { type: [string, 'null'] }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ActivePowerDataPoint' }
+          description: 最大 44,640 件
+        timestamp: { type: string, format: date-time }
+
+    # ========== /measurements/energy ==========
+
+    MeasurementsEnergyRequest:
+      type: object
+      required: [start_time, end_time]
+      properties:
+        request_id: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds:
+          type: integer
+          enum: [1800, 3600, 86400]
+          description: |
+            集計粒度（秒）。3 値のみ指定可（それ以外は 400 invalid_parameter）。
+            省略時は期間全体を 1 レコードとして data[] に返却。
+            区切りは start_time 起点、最終レコードは end_time で打ち切り（端数期間可）。
+            30 分コマ精算と突合する場合は start_time を 30 分境界（UTC 00/30 分）に
+            アラインして指定することを推奨（API 側での強制アラインなし）。
+
+    EnergyValues:
+      type: object
+      description: kWh 系フィールド（data[] 各レコード内に配置。値は当該レコードの集計区間の集計値）
+      properties:
+        import_kwh: { type: number, minimum: 0 }
+        export_kwh: { type: number, minimum: 0 }
+        baseline_kwh: { type: number }
+        self_consumed_kwh: { type: number, minimum: 0 }
+        grid_to_load_kwh: { type: number, minimum: 0 }
+        consumption_kwh: { type: number, minimum: 0 }
+        fit_export_kwh: { type: number, minimum: 0 }
+        fip_export_kwh: { type: number, minimum: 0 }
+        non_subsidized_export_kwh: { type: number, minimum: 0 }
+        curtailed_kwh: { type: number, minimum: 0 }
+        fit_curtailed_kwh: { type: number, minimum: 0 }
+        non_firm_curtailed_kwh: { type: number, minimum: 0 }
+        manual_curtailed_kwh: { type: number, minimum: 0 }
+        imbalance_kwh: { type: number }
+        dr_delivered_kwh: { type: number, minimum: 0 }
+
+    ComponentEnergyValues:
+      allOf:
+        - type: object
+          required: [component_id, component_type]
+          properties:
+            component_id: { type: string }
+            component_type:
+              type: string
+              enum: [battery, generator, consumer]
+            from_generator_kwh: { type: number, minimum: 0, description: 'battery: 同サイト generator からの充電量' }
+            from_grid_kwh: { type: number, minimum: 0, description: 'battery: 系統からの充電量' }
+            to_grid_kwh: { type: number, minimum: 0, description: 'battery: 系統への送電量' }
+            to_load_kwh: { type: number, minimum: 0, description: 'battery / generator: 同サイト load への供給量' }
+            to_battery_kwh: { type: number, minimum: 0, description: 'generator: 同サイト battery への充電供給量' }
+        - $ref: '#/components/schemas/EnergyValues'
+
+    EnergyDataRecord:
+      allOf:
+        - type: object
+          required: [start_time, end_time]
+          properties:
+            start_time:
+              type: string
+              format: date-time
+              description: 当該レコードの集計区間開始
+            end_time:
+              type: string
+              format: date-time
+              description: 集計区間終了（最終レコードのみ端数期間になり得る）
+            components:
+              type: array
+              items: { $ref: '#/components/schemas/ComponentEnergyValues' }
+              description: 'components.length ≥ 2 のサイトのみ返却（経路追跡フィールド含む）'
+        - $ref: '#/components/schemas/EnergyValues'
+
+    MeasurementsEnergyResponse:
+      type: object
+      required: [ems_id, start_time, end_time, data, timestamp]
+      description: |
+        レスポンスは常に data[] 配列（v2.2 で /measurements/active_power と統一）。
+        interval_seconds 省略時は期間全体を 1 レコードとして data[] に格納
+        （レコードの start_time / end_time = リクエスト指定値）。
+        省略時の各 kWh フィールド値 = 同一期間を interval_seconds 指定で取得した Σ data[]（集計整合性保証）。
+        計測欠損・out_of_service 時間帯は 0 として集計され、data[] は欠損スキップなく全区間分を返却。
+      properties:
+        ems_id: { type: string }
+        request_id: { type: [string, 'null'] }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        interval_seconds:
+          type: integer
+          description: リクエストで指定した場合のみ返却（指定値のエコーバック。省略時は非返却）
+        dr_dispatched_count:
+          type: integer
+          minimum: 0
+          description: 期間サマリ（top-level のみ、data[] 各レコードには含めない。consumer component を含むサイトのみ）
+        dr_total_dispatched_minutes:
+          type: integer
+          minimum: 0
+          description: 期間サマリ（同上）
+        data:
+          type: array
+          maxItems: 1488
+          items: { $ref: '#/components/schemas/EnergyDataRecord' }
+          description: 省略時 1 件 / interval_seconds 指定時は最大 1,488 件（31 日 × 48 コマ）
+        timestamp: { type: string, format: date-time }
+
+    # ========== /serviceplan ==========
+
+    ServicePlanItem:
+      type: object
+      required: [start_time, end_time, status, baseline_kw]
+      properties:
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        status: { type: integer, enum: [0, 9] }
+        baseline_kw: { type: number }
+        scheduled_delta_kw: { type: [number, 'null'] }
+        scheduled_fcr_response_kw: { type: [number, 'null'] }
+        scheduled_site_kw: { type: [number, 'null'] }
+        scheduled_sku: { type: [string, 'null'] }
+
+    ServicePlanResponse:
+      type: object
+      required: [ems_id, start_time, plans, timestamp]
+      properties:
+        ems_id: { type: string }
+        start_time: { type: string, format: date-time }
+        plans:
+          type: array
+          minItems: 48
+          maxItems: 48
+          items: { $ref: '#/components/schemas/ServicePlanItem' }
+        timestamp: { type: string, format: date-time }
+
+    # ========== エラー ==========
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer }
+        message: { type: string }
+        details: { type: string }
+        error_type:
+          type: string
+          enum:
+            - invalid_parameter
+            - authentication_error
+            - token_expired
+            - permission_denied
+            - precondition_missing
+            - rate_limit_exceeded
+            - not_supported
+            - data_not_available
+            - period_too_long
+            - data_points_exceeded
+            - baseline_not_configured
+            - baseline_unaligned
+            - baseline_out_of_range
+            - baseline_bulk_too_large
+            - baseline_not_applicable
+            - baseline_locked_after_dr
+            - baseline_query_too_large
+            - reverse_power_flow_forbidden
+            - idempotency_conflict
+            - fit_battery_coexistence_forbidden
+            - sku_not_marketable
+            - fcr_response_kw_required
+            - delta_kw_not_allowed_for_fcr
+            - delta_kw_required
+            - fcr_response_kw_not_allowed
+            - fcr_response_kw_must_be_positive
+            - schedule_query_out_of_range
+            - schedule_split_too_narrow
+            - schedule_not_found
+            - schedule_not_deletable
+            - dr_reduction_below_minimum
+            - dr_reduction_exceeds_maximum
+            - dr_duration_below_minimum
+            - dr_cooldown_active
+            - dr_duplicate_dispatch
+            - compound_breakdown_not_allowed
+            - compound_breakdown_max_mismatch
+            - compound_breakdown_value_exceeds_total
+            - compound_breakdown_invalid_key
+            - compound_breakdown_sign_mismatch
+        parameter: { type: string }
+        received_value: {}
+        valid_range: { type: string }
+        required_action: { type: string }
+        expires_at: { type: string, format: date-time }
+        limit: { type: integer }
+        remaining: { type: integer }
+        reset_time: { type: string, format: date-time }
+        retry_after: { type: integer }
+        schedule_id: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        current_time: { type: string, format: date-time }
+        idempotency_key: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [error, timestamp]
+      properties:
+        ems_id: { type: string }
+        error: { $ref: '#/components/schemas/Error' }
+        timestamp: { type: string, format: date-time }
+
+  responses:
+    BadRequest:
+      description: 400 リクエスト不正
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: 401 認証失敗（JWT 不正・Refresh Token 不正）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TokenExpired:
+      description: 498 Access Token 期限切れ（`/auth/refresh` で再取得）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: 403 アクセス権限不足
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: 404 データなし／非対応／未登録
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: 409 削除不可／重複応動／冪等キー競合
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Gone:
+      description: 410 データ量制限超過
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PreconditionFailed:
+      description: 422 前提条件未満
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TooManyRequests:
+      description: 429 レートリミット超過
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: 503 システム故障
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }

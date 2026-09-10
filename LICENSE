@@ -1,0 +1,41 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+Copyright (c) 2026 NAPIR Inc. (株式会社ナピル)
+
+This specification (the "Work") — including the Markdown specification
+documents under docs/ and the OpenAPI definitions under openapi/ — is
+licensed under the Creative Commons Attribution 4.0 International License.
+
+You are free to:
+  * Share  — copy and redistribute the material in any medium or format
+  * Adapt  — remix, transform, and build upon the material
+  for any purpose, even commercially.
+
+Under the following terms:
+  * Attribution — You must give appropriate credit, provide a link to the
+    license, and indicate if changes were made. You may do so in any
+    reasonable manner, but not in any way that suggests the licensor
+    endorses you or your use.
+
+Full license text:
+  https://creativecommons.org/licenses/by/4.0/legalcode
+Human-readable summary:
+  https://creativecommons.org/licenses/by/4.0/
+
+--------------------------------------------------------------------------
+NOTE ON SCOPE / 適用範囲について
+
+This license covers the SPECIFICATION DOCUMENTS only. It does NOT grant
+any right to access the ENECloud EMS / VPP API endpoints themselves.
+Access to the production or test environments requires a separate service
+agreement with NAPIR Inc.; base URLs and credentials are provided under
+that agreement.
+
+本ライセンスは「仕様文書」のみを対象とします。ENECloud EMS / VPP API の
+実エンドポイントへのアクセス権は付与しません。本番・テスト環境の利用には
+株式会社ナピルとの別途のサービス契約が必要であり、Base URL および認証情報は
+当該契約に基づいて個別提供されます。
+
+Trademarks: "ENECloud" and "NAPIR" are trademarks of NAPIR Inc. This
+license does not grant permission to use them except as required for
+reasonable and customary attribution.

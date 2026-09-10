@@ -1,0 +1,1539 @@
+openapi: 3.1.0
+info:
+  title: ENECloud EMS OpenAPI
+  version: "1.13"
+  description: |
+    ENECloud EMS OpenAPI（v1）。EMS ID 単位でバッテリーの状態取得・電力制御・
+    スケジュール管理・履歴取得・FCR パラメータ設定・運転計画取得を行う API。
+
+    本仕様書は `ems-openapi-v1.md`（v1.13 / 2026-07-15）に対応する。
+
+    ## 認証
+    2 種類のトークンを使用する。
+    - Refresh Token: `/auth/refresh` のみで使用。無期限（管理者により無効化可能）。
+    - Access Token: `/auth/refresh` 以外の全 API で使用。有効期限 30 日（2,592,000 秒）。
+
+    1 つのトークンセット（Refresh Token + Access Token）は 1 つの EMS ID に紐付く。
+    複数の EMS ID を操作する場合は EMS ID ごとにトークンを取得・管理する。
+
+    ## データ形式
+    - 単位: 電力値 kW、エネルギー値 kWh
+    - 符号規則: 充電（受電）は正の値 (+)、放電（供給）は負の値 (-)
+    - 日時形式: ISO 8601（例 `2025-06-13T10:30:00Z`）
+
+    ## レートリミット
+    全 API 共通で 1 時間あたり 1000 回。全レスポンスに `X-RateLimit-*` ヘッダーを含む。
+    超過時は 429 を返却する。
+
+    ## サンプル仕様（本書の例で使用する機器）
+    定格電力 1999 kW（充電/放電）、定格容量 8360 kWh、
+    運用 SOC 範囲 10-90 %（実効容量 6688 kWh）。
+  contact:
+    name: 株式会社ナピル ソリューション事業部
+  license:
+    name: CC BY 4.0
+    url: https://creativecommons.org/licenses/by/4.0/
+
+servers:
+  - url: '{baseUrl}'
+    description: |
+      Base URL（本番／テスト環境のホスト名）は公開仕様には含めません。
+      ご契約時に個別提供される値を baseUrl に設定してください。
+    variables:
+      baseUrl:
+        default: 'https://HOST'
+        description: 契約時に個別提供される Base URL（例 https://HOST）
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: 認証
+  - name: Status
+    description: リアルタイム状態取得
+  - name: Specifications
+    description: 仕様情報
+  - name: Control
+    description: 電力制御
+  - name: Schedules
+    description: スケジュール管理
+  - name: Report
+    description: 履歴取得
+  - name: FCR
+    description: FCR パラメータ管理
+  - name: ServicePlan
+    description: 運転計画
+
+paths:
+
+  # ========== 1. 認証 ==========
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Access Token 取得
+      description: |
+        Refresh Token から Access Token（JWT、30 日有効）を取得する。
+
+        - この API のみ `/v1/ems/{ems_id}/` プレフィックスを使用しない
+        - Authorization ヘッダーには **Refresh Token** を指定する
+        - レスポンスの `access_token` を以降の全 API 呼び出しで使用する
+      operationId: refreshToken
+      security:
+        - refreshAuth: []
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+              example:
+                access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                token_type: Bearer
+                expires_in: 2592000
+                expires_at: '2025-08-20T10:30:00Z'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ========== 2. リアルタイム状態取得 ==========
+
+  /v1/ems/{ems_id}/status:
+    get:
+      tags: [Status]
+      summary: システム全体状態取得
+      description: バッテリー状態、現在電力値、容量情報を一括取得する。
+      operationId: getStatus
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusResponse' }
+              examples:
+                running:
+                  summary: 放電運転中
+                  value:
+                    ems_id: a1b2c3d4e5f6789012345678901234ab
+                    status: 0
+                    in_fcr_mode: 0
+                    charge_capacity_available: 2090
+                    discharge_capacity_available: 4598
+                    charge_power_available: 1900
+                    discharge_power_available: 1900
+                    current_kw: 1185.3
+                    baseline_kw: 0.0
+                    soc: 50
+                    output_control_limit: 100
+                    measure_timestamp: '2025-06-13T10:30:00Z'
+                    timestamp: '2025-06-13T10:30:05Z'
+                idle:
+                  summary: 待機状態
+                  value:
+                    ems_id: a1b2c3d4e5f6789012345678901234ab
+                    status: 0
+                    in_fcr_mode: 0
+                    charge_capacity_available: 3344
+                    discharge_capacity_available: 3344
+                    charge_power_available: 1900
+                    discharge_power_available: 1900
+                    current_kw: 0
+                    baseline_kw: 0.0
+                    soc: 50
+                    output_control_limit: 100
+                    measure_timestamp: '2025-06-13T10:30:00Z'
+                    timestamp: '2025-06-13T10:30:05Z'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ========== 3. バッテリー仕様情報 ==========
+
+  /v1/ems/{ems_id}/specifications:
+    get:
+      tags: [Specifications]
+      summary: 定格仕様取得
+      description: バッテリーの設計仕様値を取得する。
+      operationId: getSpecifications
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpecificationsResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                rated_cap: 8360
+                dis_pwr_max: 1999
+                chg_pwr_max: 1999
+                soc_op_max: 90
+                soc_op_min: 10
+                timestamp: '2025-06-13T10:30:00Z'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ========== 4. 電力制御 ==========
+
+  /v1/ems/{ems_id}/control/power:
+    post:
+      tags: [Control]
+      summary: 電力制御指示
+      description: |
+        即座指示（`type: immediate`）またはスケジュール設定（`type: schedule`）を
+        統合した API。`power_kw` は Δ電力値（ベースラインからの差分）。
+
+        ### システム状態（status）による動作
+        | status | type | HTTP | 動作 |
+        |--------|------|------|------|
+        | 0（正常運転） | immediate | 200 | 即座指示実行 |
+        | 0（正常運転） | schedule | 200 | スケジュール登録 |
+        | 1（警告運転） | immediate | 200 | 即座指示実行 |
+        | 1（警告運転） | schedule | 200 | スケジュール登録 |
+        | 9（運用不可） | immediate | 503 | エラー返却（即座指示不可） |
+        | 9（運用不可） | schedule | 200 | スケジュール登録可（警告メッセージ付き） |
+      operationId: postControlPower
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ControlPowerRequest' }
+            examples:
+              immediate:
+                summary: 即座指示
+                value:
+                  type: immediate
+                  power_kw: -1200
+                  baseline_kw: 0.0
+                  duration_minutes: 30
+                  sku: frr
+              schedule:
+                summary: スケジュール設定
+                value:
+                  type: schedule
+                  power_kw: -1999
+                  baseline_kw: 0.0
+                  start_time: '2025-06-13T14:00:00Z'
+                  end_time: '2025-06-13T16:00:00Z'
+                  sku: fcr
+      responses:
+        '200':
+          description: 受付成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlPowerResponse' }
+              examples:
+                immediate:
+                  summary: 即座指示の受付
+                  value:
+                    ems_id: a1b2c3d4e5f6789012345678901234ab
+                    message: Power control accepted
+                    control_type: immediate
+                    power_kw: -1200
+                    baseline_kw: 0.0
+                    sku: frr
+                    timestamp: '2025-06-13T10:30:00Z'
+                schedule_status9:
+                  summary: status=9 時のスケジュール登録（警告メッセージ付き）
+                  value:
+                    ems_id: a1b2c3d4e5f6789012345678901234ab
+                    message: Schedule registered. System failure or under maintenance
+                    control_type: schedule
+                    power_kw: -1999
+                    baseline_kw: 0.0
+                    sku: fcr
+                    start_time: '2025-06-13T14:00:00Z'
+                    end_time: '2025-06-13T16:00:00Z'
+                    timestamp: '2025-06-13T10:30:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503':
+          description: |
+            503 システム故障。status=9（運用不可）時の即座指示は本エラーを返却する。
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                error:
+                  code: 503
+                  message: System failure or under maintenance
+                  details: Immediate control is not available while system is out of service
+                timestamp: '2025-06-13T10:30:00Z'
+
+  # ========== 5. スケジュール管理 ==========
+
+  /v1/ems/{ems_id}/control/schedules:
+    get:
+      tags: [Schedules]
+      summary: スケジュール取得
+      description: |
+        設定済みスケジュール一覧を取得する。
+        重複登録による自動分割後の結果が反映される。
+      operationId: getSchedules
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchedulesResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                schedules:
+                  - id: sch_001
+                    start_time: '2025-06-13T14:00:00Z'
+                    end_time: '2025-06-13T19:00:00Z'
+                    power_kw: 1999
+                    sku: rr-fit
+                    created_at: '2025-06-13T10:30:00Z'
+                  - id: sch_002
+                    start_time: '2025-06-14T04:00:00Z'
+                    end_time: '2025-06-14T07:00:00Z'
+                    power_kw: -1999
+                    sku: fcr
+                    created_at: '2025-06-13T10:30:00Z'
+                timestamp: '2025-06-13T10:30:00Z'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [Schedules]
+      summary: スケジュール削除
+      description: |
+        指定したスケジュールを削除する。
+
+        ### 削除制約条件（時分単位でチェック）
+        | 条件 | 削除可否 | コード | 説明 |
+        |------|----------|--------|------|
+        | 実行中 | 不可 | 409 | +1 分は削除可能 |
+        | 開始 1 分前以内 | 不可 | 409 | 開始時刻まで 1 分未満 |
+        | 完了済み | 不可 | 409 | 既に完了したスケジュール |
+        | 予定済み | 可能 | 200 | 開始 1 分前以上 |
+
+        開始 1 分前以内のスケジュールは削除できないが、上書き登録は可能。
+      operationId: deleteSchedule
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+        - name: id
+          in: query
+          required: true
+          description: 削除対象のスケジュール識別子
+          schema:
+            type: string
+            examples: [sch_001]
+      responses:
+        '200':
+          description: 削除成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeleteScheduleResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                message: Schedule deleted successfully
+                schedule_id: sch_001
+                timestamp: '2025-06-13T10:30:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 409 削除不可（実行中・開始 1 分前以内・完了済み）
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                error:
+                  code: 409
+                  message: Schedule cannot be deleted
+                  details: Schedule is currently executing and cannot be deleted
+                  schedule_id: sch_001
+                  start_time: '2025-06-13T14:00:00Z'
+                  current_time: '2025-06-13T14:30:00Z'
+                timestamp: '2025-06-13T14:30:00Z'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ========== 6. 電力値履歴 ==========
+
+  /v1/ems/{ems_id}/report/power:
+    post:
+      tags: [Report]
+      summary: 電力値履歴取得
+      description: |
+        電力値（kW）と系統周波数の時系列データを取得する。
+
+        - 取得期間（`end_time` - `start_time`）: 1 秒〜31 日
+        - `start_time` は現在時刻から 365 日以内
+        - 取得最大データ件数: 30,000 件（超過時は 410）
+      operationId: postReportPower
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportPowerRequest' }
+            example:
+              request_id: report_req_001
+              start_time: '2025-06-12T00:00:00Z'
+              end_time: '2025-06-13T00:00:00Z'
+              interval_seconds: 60
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportPowerResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                request_id: report_req_001
+                start_time: '2025-06-12T00:00:00Z'
+                end_time: '2025-06-13T00:00:00Z'
+                interval_seconds: 60
+                data:
+                  - power_kw: -1485.2
+                    baseline_kw: 0.0
+                    delta_kw: -1485.2
+                    actual_frequency: 50.0
+                    output_control_limit: 100
+                    timestamp: '2025-06-12T00:00:00Z'
+                  - power_kw: -1499.4
+                    baseline_kw: 0.0
+                    delta_kw: -1499.4
+                    actual_frequency: 50.0
+                    output_control_limit: 100
+                    timestamp: '2025-06-12T00:01:00Z'
+                timestamp: '2025-06-13T10:30:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ========== 7. エネルギー履歴 ==========
+
+  /v1/ems/{ems_id}/report/energy:
+    post:
+      tags: [Report]
+      summary: エネルギー履歴取得
+      description: |
+        充放電エネルギー量（kWh）の期間内累積値を取得する。
+
+        - 取得期間（`end_time` - `start_time`）: 1 秒〜31 日
+        - `start_time` は現在時刻から 365 日以内
+        - 取得最大データ件数: 30,000 件（超過時は 410）
+      operationId: postReportEnergy
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportEnergyRequest' }
+            example:
+              request_id: report_req_001
+              start_time: '2025-06-01T00:00:00Z'
+              end_time: '2025-06-13T23:59:59Z'
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportEnergyResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                request_id: report_req_001
+                start_time: '2025-06-01T00:00:00Z'
+                end_time: '2025-06-13T23:59:59Z'
+                charge_kwh: 47850
+                discharge_kwh: 42045
+                timestamp: '2025-06-13T10:30:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ========== 8. FCR パラメータ管理 ==========
+
+  /v1/ems/{ems_id}/fcr/config:
+    get:
+      tags: [FCR]
+      summary: FCR パラメータ取得
+      description: 一次調整力（FCR）応動パラメータの現在値を取得する。
+      operationId: getFcrConfig
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FcrConfigResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                freq_ref: 50
+                up_deadband: 0.05
+                low_deadband: 0.05
+                up_droop: 5
+                low_droop: 5
+                timestamp: '2025-06-13T10:30:00Z'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      tags: [FCR]
+      summary: FCR パラメータ設定
+      description: 一次調整力（FCR）応動パラメータを設定する。
+      operationId: postFcrConfig
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FcrConfigRequest' }
+            example:
+              freq_ref: 50
+              up_deadband: 0.05
+              low_deadband: 0.05
+              up_droop: 5
+              low_droop: 5
+      responses:
+        '200':
+          description: 設定成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FcrConfigUpdateResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                message: FCR configuration updated successfully
+                freq_ref: 50
+                up_deadband: 0.05
+                low_deadband: 0.05
+                up_droop: 5
+                low_droop: 5
+                timestamp: '2025-06-13T10:30:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  # ========== 9. 運転計画 ==========
+
+  /v1/ems/{ems_id}/serviceplan:
+    get:
+      tags: [ServicePlan]
+      summary: 運転計画一覧取得
+      description: |
+        指定時刻を起点に 30 分刻みの in service / out of service 運転計画を 48 件取得する。
+
+        `status` は 0（in service）/ 9（out of service）の 2 値。
+        警告運転（`status=1`）は実時間状態のため運転計画には含めない。
+      operationId: getServicePlan
+      parameters:
+        - $ref: '#/components/parameters/EmsIdPath'
+        - name: start_time
+          in: query
+          required: false
+          description: 取得開始時刻（ISO 8601 形式、省略時は現在時刻）
+          schema:
+            type: string
+            format: date-time
+            examples: ['2025-06-13T00:00:00Z']
+      responses:
+        '200':
+          description: 成功
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServicePlanResponse' }
+              example:
+                ems_id: a1b2c3d4e5f6789012345678901234ab
+                start_time: '2025-06-13T00:00:00Z'
+                plans:
+                  - { start_time: '2025-06-13T00:00:00Z', end_time: '2025-06-13T00:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T00:30:00Z', end_time: '2025-06-13T01:00:00Z', status: 9, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T01:00:00Z', end_time: '2025-06-13T01:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T01:30:00Z', end_time: '2025-06-13T02:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T02:00:00Z', end_time: '2025-06-13T02:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T02:30:00Z', end_time: '2025-06-13T03:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T03:00:00Z', end_time: '2025-06-13T03:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T03:30:00Z', end_time: '2025-06-13T04:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T04:00:00Z', end_time: '2025-06-13T04:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T04:30:00Z', end_time: '2025-06-13T05:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T05:00:00Z', end_time: '2025-06-13T05:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T05:30:00Z', end_time: '2025-06-13T06:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T06:00:00Z', end_time: '2025-06-13T06:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T06:30:00Z', end_time: '2025-06-13T07:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T07:00:00Z', end_time: '2025-06-13T07:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T07:30:00Z', end_time: '2025-06-13T08:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T08:00:00Z', end_time: '2025-06-13T08:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T08:30:00Z', end_time: '2025-06-13T09:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T09:00:00Z', end_time: '2025-06-13T09:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T09:30:00Z', end_time: '2025-06-13T10:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T10:00:00Z', end_time: '2025-06-13T10:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T10:30:00Z', end_time: '2025-06-13T11:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T11:00:00Z', end_time: '2025-06-13T11:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T11:30:00Z', end_time: '2025-06-13T12:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T12:00:00Z', end_time: '2025-06-13T12:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T12:30:00Z', end_time: '2025-06-13T13:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T13:00:00Z', end_time: '2025-06-13T13:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T13:30:00Z', end_time: '2025-06-13T14:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T14:00:00Z', end_time: '2025-06-13T14:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T14:30:00Z', end_time: '2025-06-13T15:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T15:00:00Z', end_time: '2025-06-13T15:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T15:30:00Z', end_time: '2025-06-13T16:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T16:00:00Z', end_time: '2025-06-13T16:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T16:30:00Z', end_time: '2025-06-13T17:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T17:00:00Z', end_time: '2025-06-13T17:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T17:30:00Z', end_time: '2025-06-13T18:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T18:00:00Z', end_time: '2025-06-13T18:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T18:30:00Z', end_time: '2025-06-13T19:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T19:00:00Z', end_time: '2025-06-13T19:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T19:30:00Z', end_time: '2025-06-13T20:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T20:00:00Z', end_time: '2025-06-13T20:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T20:30:00Z', end_time: '2025-06-13T21:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T21:00:00Z', end_time: '2025-06-13T21:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T21:30:00Z', end_time: '2025-06-13T22:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T22:00:00Z', end_time: '2025-06-13T22:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T22:30:00Z', end_time: '2025-06-13T23:00:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T23:00:00Z', end_time: '2025-06-13T23:30:00Z', status: 0, baseline_kw: 0.0 }
+                  - { start_time: '2025-06-13T23:30:00Z', end_time: '2025-06-14T00:00:00Z', status: 0, baseline_kw: 0.0 }
+                timestamp: '2025-06-13T10:30:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT (Access Token)
+      description: '`Authorization: Bearer {access_token}`（有効期限 30 日）'
+    refreshAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Refresh Token
+      description: '`Authorization: Bearer {refresh_token}`（`/auth/refresh` 専用）'
+
+  parameters:
+    EmsIdPath:
+      name: ems_id
+      in: path
+      required: true
+      description: EMS 識別子（32 バイト UUID、ハイフン無し、文字種 0-9 / a-f）
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
+        examples: [a1b2c3d4e5f6789012345678901234ab]
+
+  headers:
+    XRateLimitLimit:
+      description: 期間内の上限リクエスト回数（1000 回 / 1 時間）
+      schema: { type: integer, examples: [1000] }
+    XRateLimitRemaining:
+      description: 期間内の残りリクエスト回数
+      schema: { type: integer, examples: [847] }
+    XRateLimitReset:
+      description: 上限リセット時刻（UNIX 秒）
+      schema: { type: integer, examples: [1724068800] }
+    XRateLimitResetAfter:
+      description: 上限リセットまでの残り秒数
+      schema: { type: integer, examples: [1800] }
+
+  schemas:
+
+    # ========== 共通 ==========
+
+    Sku:
+      type: string
+      description: |
+        市場応札 SKU。
+        `fcr`: 一次調整力 / `s-frr`: 二次調整力① / `frr`: 二次調整力② /
+        `rr`: 三次調整力① / `rr-fit`: 三次調整力② /
+        `jepx-da`: JEPX スポット / `jepx-ttv`: JEPX 時間前 / `unknown`: なし
+      enum: [fcr, s-frr, frr, rr, rr-fit, jepx-da, jepx-ttv, unknown]
+
+    EmsId:
+      type: string
+      pattern: '^[0-9a-f]{32}$'
+      description: EMS 識別子（32 バイト UUID、ハイフン無し）
+      examples: [a1b2c3d4e5f6789012345678901234ab]
+
+    # ========== 1. 認証 ==========
+
+    AuthResponse:
+      type: object
+      required: [access_token, token_type, expires_in, expires_at]
+      properties:
+        access_token:
+          type: string
+          description: 以降の API 呼び出しで使用する Access Token（JWT 形式）
+        token_type:
+          type: string
+          enum: [Bearer]
+          description: '`Bearer`（固定）'
+        expires_in:
+          type: integer
+          description: 有効期間（秒）= 2,592,000 秒（30 日）
+          examples: [2592000]
+        expires_at:
+          type: string
+          format: date-time
+          description: 有効期限（ISO 8601 形式）
+
+    # ========== 2. リアルタイム状態取得 ==========
+
+    StatusResponse:
+      type: object
+      required:
+        - ems_id
+        - status
+        - in_fcr_mode
+        - charge_capacity_available
+        - discharge_capacity_available
+        - charge_power_available
+        - discharge_power_available
+        - current_kw
+        - baseline_kw
+        - soc
+        - output_control_limit
+        - measure_timestamp
+        - timestamp
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        status:
+          type: integer
+          enum: [0, 1, 9]
+          description: 'システム状態（0: 正常運転, 1: 警告運転, 9: 運用不可）'
+        in_fcr_mode:
+          type: integer
+          enum: [0, 1]
+          description: 'FCR 応動状態（0: それ以外, 1: 一次調整応動中）'
+        charge_capacity_available:
+          type: number
+          minimum: 0
+          description: '[kWh] 現在充電可能な容量（0 〜 定格容量）'
+        discharge_capacity_available:
+          type: number
+          minimum: 0
+          description: '[kWh] 現在放電可能な容量（0 〜 定格容量）'
+        charge_power_available:
+          type: number
+          minimum: 0
+          description: '[kW] 現在充電可能な電力（0 〜 定格電力）'
+        discharge_power_available:
+          type: number
+          minimum: 0
+          description: '[kW] 現在放電可能な電力（0 〜 定格電力）'
+        current_kw:
+          type: number
+          description: '[kW] 現在の電力値（正: 充電, 負: 放電、-定格電力 〜 +定格電力）'
+        baseline_kw:
+          type: number
+          description: '[kW] ベースライン電力値（存在しない場合は 0 として扱う）'
+        soc:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: '[%] 現在の SOC（State of Charge）'
+        output_control_limit:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: '[%] 出力制御上限'
+        measure_timestamp:
+          type: string
+          format: date-time
+          description: 計測時刻（ISO 8601 形式）
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== 3. バッテリー仕様情報 ==========
+
+    SpecificationsResponse:
+      type: object
+      required: [ems_id, rated_cap, dis_pwr_max, chg_pwr_max, soc_op_max, soc_op_min, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        rated_cap:
+          type: number
+          minimum: 0
+          description: '[kWh] 定格容量'
+        dis_pwr_max:
+          type: number
+          minimum: 0
+          description: '[kW] 定格最大放電電力'
+        chg_pwr_max:
+          type: number
+          minimum: 0
+          description: '[kW] 定格最大充電電力'
+        soc_op_max:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: '[%] 運用可能 SOC 上限'
+        soc_op_min:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: '[%] 運用可能 SOC 下限'
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== 4. 電力制御 ==========
+
+    ControlPowerRequest:
+      oneOf:
+        - $ref: '#/components/schemas/ImmediateControlRequest'
+        - $ref: '#/components/schemas/ScheduleControlRequest'
+      discriminator:
+        propertyName: type
+        mapping:
+          immediate: '#/components/schemas/ImmediateControlRequest'
+          schedule: '#/components/schemas/ScheduleControlRequest'
+
+    ImmediateControlRequest:
+      type: object
+      description: 即座指示パラメータ
+      required: [type, power_kw, duration_minutes]
+      properties:
+        type:
+          type: string
+          enum: [immediate]
+          description: 制御タイプ（即座指示）
+        power_kw:
+          type: number
+          minimum: -999999
+          maximum: 999999
+          description: '[kW] Δ電力値（ベースラインからの差分、正: 充電方向, 負: 放電方向）'
+        baseline_kw:
+          type: number
+          minimum: -999999
+          maximum: 999999
+          default: 0
+          description: '[kW] ベースライン電力値（省略時は 0 として扱う）'
+        duration_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: '[分] 継続時間'
+        sku:
+          allOf:
+            - $ref: '#/components/schemas/Sku'
+          description: 応札商品 SKU（任意。FCR 応動の場合は必須）
+
+    ScheduleControlRequest:
+      type: object
+      description: スケジュール設定パラメータ
+      required: [type, power_kw, start_time, end_time]
+      properties:
+        type:
+          type: string
+          enum: [schedule]
+          description: 制御タイプ（スケジュール設定）
+        power_kw:
+          type: number
+          minimum: -999999
+          maximum: 999999
+          description: '[kW] Δ電力値（ベースラインからの差分、正: 充電方向, 負: 放電方向）'
+        baseline_kw:
+          type: number
+          minimum: -999999
+          maximum: 999999
+          default: 0
+          description: '[kW] ベースライン電力値（省略時は 0 として扱う）'
+        start_time:
+          type: string
+          format: date-time
+          description: 開始時刻（ISO 8601 形式、現在時刻 +1 分 〜 +90 日、1 分単位）
+        end_time:
+          type: string
+          format: date-time
+          description: 終了時刻（ISO 8601 形式、start_time +1 分 〜 start_time +24 時間、1 分単位）
+        sku:
+          allOf:
+            - $ref: '#/components/schemas/Sku'
+          description: 応札商品 SKU（任意。FCR 応動の場合は必須）
+
+    ControlPowerResponse:
+      type: object
+      required: [ems_id, message, control_type, power_kw, baseline_kw, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        message:
+          type: string
+          description: 処理結果メッセージ
+          examples: [Power control accepted]
+        control_type:
+          type: string
+          enum: [immediate, schedule]
+          description: 実行された制御タイプ
+        power_kw:
+          type: number
+          minimum: -999999
+          maximum: 999999
+          description: '[kW] 設定された Δ電力値（正: 充電方向, 負: 放電方向）'
+        baseline_kw:
+          type: number
+          minimum: -999999
+          maximum: 999999
+          description: '[kW] ベースライン電力値（存在しない場合は 0 として扱う）'
+        sku:
+          allOf:
+            - $ref: '#/components/schemas/Sku'
+          description: 設定された応札商品 SKU（FCR 応動の場合のみ返却）
+        start_time:
+          type: string
+          format: date-time
+          description: 開始時刻（schedule の場合のみ、ISO 8601 形式）
+        end_time:
+          type: string
+          format: date-time
+          description: 終了時刻（schedule の場合のみ、ISO 8601 形式）
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== 5. スケジュール管理 ==========
+
+    Schedule:
+      type: object
+      required: [id, start_time, end_time, power_kw, created_at]
+      properties:
+        id:
+          type: string
+          description: スケジュール識別子
+          examples: [sch_001]
+        start_time:
+          type: string
+          format: date-time
+          description: 開始時刻（ISO 8601 形式）
+        end_time:
+          type: string
+          format: date-time
+          description: 終了時刻（ISO 8601 形式）
+        power_kw:
+          type: number
+          minimum: -999999
+          maximum: 999999
+          description: '[kW] Δ電力値（ベースラインからの差分、正: 充電方向, 負: 放電方向）'
+        sku:
+          allOf:
+            - $ref: '#/components/schemas/Sku'
+          description: 応札商品 SKU
+        created_at:
+          type: string
+          format: date-time
+          description: 登録時刻（ISO 8601 形式）
+
+    SchedulesResponse:
+      type: object
+      required: [ems_id, schedules, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        schedules:
+          type: array
+          description: スケジュール一覧（自動分割後の結果）
+          items: { $ref: '#/components/schemas/Schedule' }
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    DeleteScheduleResponse:
+      type: object
+      required: [ems_id, message, schedule_id, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        message:
+          type: string
+          description: 処理結果メッセージ
+          examples: [Schedule deleted successfully]
+        schedule_id:
+          type: string
+          description: 削除されたスケジュール識別子
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== 6. 電力値履歴 ==========
+
+    ReportPowerRequest:
+      type: object
+      required: [start_time, end_time]
+      properties:
+        request_id:
+          type: string
+          description: リクエスト識別子
+          examples: [report_req_001]
+        start_time:
+          type: string
+          format: date-time
+          description: 取得開始時刻（ISO 8601 形式、現在時刻から 365 日以内）
+        end_time:
+          type: string
+          format: date-time
+          description: 取得終了時刻（ISO 8601 形式、start_time との差は 1 秒 〜 31 日）
+        interval_seconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          default: 60
+          description: '[秒] データ間隔'
+
+    PowerRecord:
+      type: object
+      required: [power_kw, baseline_kw, delta_kw, actual_frequency, output_control_limit, timestamp]
+      properties:
+        power_kw:
+          type: number
+          description: '[kW] 電力値（正: 充電, 負: 放電、-定格電力 〜 +定格電力）'
+        baseline_kw:
+          type: number
+          description: '[kW] ベースライン電力値（存在しない場合は 0 として扱う）'
+        delta_kw:
+          type: number
+          description: '[kW] 差分電力値（power_kw - baseline_kw）'
+        actual_frequency:
+          type: number
+          minimum: 45.0
+          maximum: 65.0
+          description: '[Hz] 系統周波数'
+        output_control_limit:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: '[%] 出力制御上限'
+        timestamp:
+          type: string
+          format: date-time
+          description: レコード時刻（ISO 8601 形式）
+
+    ReportPowerResponse:
+      type: object
+      required: [ems_id, start_time, end_time, interval_seconds, data, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        request_id:
+          type: string
+          description: リクエスト識別子
+        start_time:
+          type: string
+          format: date-time
+          description: 取得開始時刻（ISO 8601 形式）
+        end_time:
+          type: string
+          format: date-time
+          description: 取得終了時刻（ISO 8601 形式）
+        interval_seconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          description: '[秒] データ間隔'
+        data:
+          type: array
+          description: 履歴データ配列（最大 30,000 件）
+          maxItems: 30000
+          items: { $ref: '#/components/schemas/PowerRecord' }
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== 7. エネルギー履歴 ==========
+
+    ReportEnergyRequest:
+      type: object
+      required: [start_time, end_time]
+      properties:
+        request_id:
+          type: string
+          description: リクエスト識別子
+          examples: [report_req_001]
+        start_time:
+          type: string
+          format: date-time
+          description: 取得開始時刻（ISO 8601 形式、現在時刻から 365 日以内）
+        end_time:
+          type: string
+          format: date-time
+          description: 取得終了時刻（ISO 8601 形式、start_time との差は 1 秒 〜 31 日）
+
+    ReportEnergyResponse:
+      type: object
+      required: [ems_id, start_time, end_time, charge_kwh, discharge_kwh, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        request_id:
+          type: string
+          description: リクエスト識別子
+        start_time:
+          type: string
+          format: date-time
+          description: 取得開始時刻（ISO 8601 形式）
+        end_time:
+          type: string
+          format: date-time
+          description: 取得終了時刻（ISO 8601 形式）
+        charge_kwh:
+          type: number
+          minimum: 0
+          description: '[kWh] 期間内の累積充電電力量'
+        discharge_kwh:
+          type: number
+          minimum: 0
+          description: '[kWh] 期間内の累積放電電力量'
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== 8. FCR パラメータ管理 ==========
+
+    FcrConfigRequest:
+      type: object
+      required: [freq_ref, up_deadband, low_deadband, up_droop, low_droop]
+      properties:
+        freq_ref:
+          type: number
+          minimum: 49.5
+          maximum: 60.5
+          description: '[Hz] 基準周波数（50Hz/60Hz 地域対応）'
+        up_deadband:
+          type: number
+          minimum: 0.00
+          maximum: 0.20
+          description: '[Hz] 上側不感帯幅'
+        low_deadband:
+          type: number
+          minimum: 0.00
+          maximum: 0.20
+          description: '[Hz] 下側不感帯幅'
+        up_droop:
+          type: number
+          minimum: 0.200
+          maximum: 10.000
+          description: '[%] 上側調定率'
+        low_droop:
+          type: number
+          minimum: 0.200
+          maximum: 10.000
+          description: '[%] 下側調定率'
+
+    FcrConfigResponse:
+      type: object
+      required: [ems_id, freq_ref, up_deadband, low_deadband, up_droop, low_droop, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        freq_ref:
+          type: number
+          minimum: 49.5
+          maximum: 60.5
+          description: '[Hz] 基準周波数'
+        up_deadband:
+          type: number
+          minimum: 0.00
+          maximum: 0.20
+          description: '[Hz] 上側不感帯幅'
+        low_deadband:
+          type: number
+          minimum: 0.00
+          maximum: 0.20
+          description: '[Hz] 下側不感帯幅'
+        up_droop:
+          type: number
+          minimum: 0.200
+          maximum: 10.000
+          description: '[%] 上側調定率'
+        low_droop:
+          type: number
+          minimum: 0.200
+          maximum: 10.000
+          description: '[%] 下側調定率'
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    FcrConfigUpdateResponse:
+      type: object
+      required: [ems_id, message, freq_ref, up_deadband, low_deadband, up_droop, low_droop, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        message:
+          type: string
+          description: 処理結果メッセージ
+          examples: [FCR configuration updated successfully]
+        freq_ref:
+          type: number
+          minimum: 49.5
+          maximum: 60.5
+          description: '[Hz] 設定された基準周波数'
+        up_deadband:
+          type: number
+          minimum: 0.00
+          maximum: 0.20
+          description: '[Hz] 設定された上側不感帯幅'
+        low_deadband:
+          type: number
+          minimum: 0.00
+          maximum: 0.20
+          description: '[Hz] 設定された下側不感帯幅'
+        up_droop:
+          type: number
+          minimum: 0.200
+          maximum: 10.000
+          description: '[%] 設定された上側調定率'
+        low_droop:
+          type: number
+          minimum: 0.200
+          maximum: 10.000
+          description: '[%] 設定された下側調定率'
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== 9. 運転計画 ==========
+
+    ServicePlanSlot:
+      type: object
+      required: [start_time, end_time, status, baseline_kw]
+      properties:
+        start_time:
+          type: string
+          format: date-time
+          description: スロット開始時刻（ISO 8601 形式）
+        end_time:
+          type: string
+          format: date-time
+          description: スロット終了時刻（ISO 8601 形式、start_time + 30 分）
+        status:
+          type: integer
+          enum: [0, 9]
+          description: '運転状態（0: in service, 9: out of service）'
+        baseline_kw:
+          type: number
+          description: '[kW] ベースライン電力値（-定格電力 〜 +定格電力）'
+
+    ServicePlanResponse:
+      type: object
+      required: [ems_id, start_time, plans, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        start_time:
+          type: string
+          format: date-time
+          description: 取得開始時刻（ISO 8601 形式）
+        plans:
+          type: array
+          description: 運転計画配列（30 分刻み、48 件固定）
+          minItems: 48
+          maxItems: 48
+          items: { $ref: '#/components/schemas/ServicePlanSlot' }
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+    # ========== エラー ==========
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          enum: [400, 401, 403, 404, 409, 410, 429, 498, 503]
+          description: HTTP エラーコード
+        message:
+          type: string
+          description: エラーメッセージ
+        details:
+          type: string
+          description: エラー詳細情報
+        parameter:
+          type: string
+          description: エラー対象パラメータ名（該当時のみ）
+        received_value:
+          description: 受信した値（該当時のみ）
+        valid_range:
+          type: string
+          description: 有効範囲（該当時のみ）
+        error_type:
+          type: string
+          description: エラー種別（認証エラー時のみ）
+          examples: [authentication_error, token_expired]
+        expires_at:
+          type: string
+          format: date-time
+          description: トークン有効期限（認証エラー時のみ、ISO 8601 形式）
+        schedule_id:
+          type: string
+          description: 対象スケジュール識別子（スケジュール削除エラー時のみ）
+        start_time:
+          type: string
+          format: date-time
+          description: 対象スケジュール開始時刻（スケジュール削除エラー時のみ）
+        current_time:
+          type: string
+          format: date-time
+          description: 現在時刻（スケジュール削除エラー時のみ）
+        limit:
+          type: integer
+          description: 期間内の上限リクエスト回数（レートリミット超過時のみ）
+        remaining:
+          type: integer
+          description: 期間内の残りリクエスト回数（レートリミット超過時のみ）
+        reset_time:
+          type: string
+          format: date-time
+          description: 上限リセット時刻（レートリミット超過時のみ、ISO 8601 形式）
+        retry_after:
+          type: integer
+          description: '[秒] 再試行までの待機秒数（レートリミット超過時のみ）'
+
+    ErrorResponse:
+      type: object
+      required: [error, timestamp]
+      properties:
+        ems_id: { $ref: '#/components/schemas/EmsId' }
+        error: { $ref: '#/components/schemas/Error' }
+        timestamp:
+          type: string
+          format: date-time
+          description: API 応答時刻（ISO 8601 形式）
+
+  responses:
+    BadRequest:
+      description: 400 リクエスト不正（パラメータ不足、値が範囲外）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            ems_id: a1b2c3d4e5f6789012345678901234ab
+            error:
+              code: 400
+              message: 'Invalid parameter: power_kw must be between -999999 and 999999'
+              details: Requested power 2500kW exceeds maximum discharge power 1999kW
+              parameter: power_kw
+              received_value: 2500
+              valid_range: '-999999 to 999999'
+            timestamp: '2025-08-19T10:30:00Z'
+
+    Unauthorized:
+      description: 401 認証失敗（Refresh Token / Access Token が不正）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            ems_id: a1b2c3d4e5f6789012345678901234ab
+            error:
+              code: 401
+              message: Authentication failed
+              details: Invalid or expired JWT token
+              error_type: authentication_error
+            timestamp: '2025-08-19T10:30:00Z'
+
+    Forbidden:
+      description: 403 アクセス権限不足（蓄電所へのアクセス権なし）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    NotFound:
+      description: 404 データなし（指定時刻のデータが存在しない）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    Gone:
+      description: 410 データ量制限超過（取得期間が長すぎる）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    TooManyRequests:
+      description: 429 レートリミット超過（1000 回 / 1 時間）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            ems_id: a1b2c3d4e5f6789012345678901234ab
+            error:
+              code: 429
+              message: Rate limit exceeded
+              details: API call limit exceeded
+              limit: 1000
+              remaining: 0
+              reset_time: '2025-08-19T16:00:00Z'
+              retry_after: 1800
+            timestamp: '2025-08-19T15:30:00Z'
+
+    TokenExpired:
+      description: 498 認証キー期限切れ（`/auth/refresh` で新しい Access Token を取得）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            ems_id: a1b2c3d4e5f6789012345678901234ab
+            error:
+              code: 498
+              message: JWT token expired
+              details: Token expired at 2025-08-19T09:30:00Z, current time is 2025-08-19T10:30:00Z
+              error_type: token_expired
+              expires_at: '2025-08-19T09:30:00Z'
+            timestamp: '2025-08-19T10:30:00Z'
+
+    ServiceUnavailable:
+      description: 503 システム故障（システム異常）
+      headers:
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+        X-RateLimit-Reset-After: { $ref: '#/components/headers/XRateLimitResetAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }

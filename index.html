@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ENECloud EMS / VPP API 仕様</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{--bg:#f7f8fa;--card:#fff;--ink:#1b2b3a;--sub:#5b6b7c;--line:#e2e7ec;--accent:#0b6bcb;}
+  @media (prefers-color-scheme:dark){:root{--bg:#11171d;--card:#1a222b;--ink:#e8eef4;--sub:#9fb0c0;--line:#2b3742;--accent:#5fa8f5;}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;line-height:1.75}
+  .wrap{max-width:920px;margin:0 auto;padding:48px 20px 80px}
+  h1{font-size:1.75rem;margin:0 0 6px}
+  .lead{color:var(--sub);margin:0 0 32px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:16px}
+  .card h2{margin:0 0 4px;font-size:1.15rem}
+  .card .ver{color:var(--sub);font-size:.85rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .card p{margin:8px 0 14px;color:var(--sub);font-size:.93rem}
+  .links a{display:inline-block;margin-right:10px;margin-bottom:6px;padding:6px 13px;border:1px solid var(--line);border-radius:7px;
+           text-decoration:none;color:var(--accent);font-size:.88rem;background:transparent}
+  .links a:hover{border-color:var(--accent)}
+  .links a.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .badge{display:inline-block;font-size:.72rem;padding:2px 8px;border-radius:99px;vertical-align:middle;margin-left:8px}
+  .rec{background:#0b6bcb1a;color:var(--accent);border:1px solid #0b6bcb55}
+  .old{background:#8888881a;color:var(--sub);border:1px solid var(--line)}
+  footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--line);color:var(--sub);font-size:.85rem}
+  footer a{color:var(--accent)}
+  .note{background:#0b6bcb0d;border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0;font-size:.9rem;color:var(--sub);margin:0 0 28px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ENECloud EMS / VPP API 仕様</h1>
+  <p class="lead">蓄電池等の分散リソースを制御・計測し、需給調整市場・卸電力市場への応札運用を行うアグリゲーター開発者向けのリファレンスです。</p>
+
+  <div class="note">
+    <strong>新規開発は EMS OpenAPI v2 + VPP API v1 の組み合わせを使用してください。</strong><br>
+    Base URL（本番／テスト環境のホスト名）は本公開仕様には含めていません。ご契約時に個別提供します。
+  </div>
+
+  <div class="card">
+    <h2>EMS OpenAPI<span class="badge rec">推奨</span></h2>
+    <div class="ver">v2.2 &nbsp;·&nbsp; /v2/ems/{id}/</div>
+    <p>1 サイト = 1 連系点単位の制御・計測・スケジュール管理 API。</p>
+    <div class="links">
+      <a class="primary" href="./ems-v2.html">📘 API リファレンス</a>
+      <a href="./docs/ems-openapi-v2.md">仕様書 (Markdown)</a>
+      <a href="./openapi/ems-openapi-v2.yaml">OpenAPI YAML</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>VPP API<span class="badge rec">推奨</span></h2>
+    <div class="ver">v1.3 &nbsp;·&nbsp; /v1/vpp/{vpp_id}/</div>
+    <p>複数の物理 EMS（最大 100 メンバー）を仮想 EMS として束ねる API。監視・精算のデータ取得は VPP API のみで完結します。</p>
+    <div class="links">
+      <a class="primary" href="./vpp-v1.html">📘 API リファレンス</a>
+      <a href="./docs/vpp-api-v1.md">仕様書 (Markdown)</a>
+      <a href="./openapi/vpp-openapi-v1.yaml">OpenAPI YAML</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>EMS OpenAPI v1<span class="badge old">旧版・既存互換</span></h2>
+    <div class="ver">v1.13 &nbsp;·&nbsp; /v1/ems/{id}/</div>
+    <p>既存インテグレーションとの互換性のために維持されている版です。新規開発では v2 を使用してください。</p>
+    <div class="links">
+      <a href="./ems-v1.html">📘 API リファレンス</a>
+      <a href="./docs/ems-openapi-v1.md">仕様書 (Markdown)</a>
+      <a href="./openapi/ems-openapi-v1.yaml">OpenAPI YAML</a>
+    </div>
+  </div>
+
+  <footer>
+    仕様文書は <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> で提供されます。
+    本ライセンスは実エンドポイントへのアクセス権を付与しません — API のご利用には別途サービス契約が必要です。<br>
+    © 2026 株式会社ナピル (NAPIR Inc.)
+  </footer>
+</div>
+</body>
+</html>
