@@ -1,10 +1,10 @@
 # EMS OpenAPI v2 サンプル集
 
 **対象バージョン**: 2.2
-**本編**: [EMS OpenAPI 説明書 v2](ems-openapi-v2.md)
+**本編**: [ENECloud EMS OpenAPI 説明書 v2](ems-openapi-v2.md)
 
-> 本書は [EMS OpenAPI 説明書 v2](ems-openapi-v2.md) の付録 B（リクエスト／レスポンスのサンプル集）です。
-> フィールドの定義・制約は本編の該当節を参照してください。
+> 本書は [EMS OpenAPI 説明書 v2](ems-openapi-v2.md) のリクエスト／レスポンスのサンプル集です。
+> フィールドの定義・制約・バリデーションは本編の該当節を参照してください。
 
 ---
 

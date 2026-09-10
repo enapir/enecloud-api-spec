@@ -1,4 +1,4 @@
-# ENECloud EMS VPP API 仕様説明書
+# ENECloud EMS VPP API 説明書
 
 **バージョン**: 1.4
 **ステータス**: **正式版（Released）**

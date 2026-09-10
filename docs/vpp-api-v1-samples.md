@@ -1,9 +1,9 @@
 # VPP API v1 サンプル集
 
 **対象バージョン**: 1.4
-**本編**: [ENECloud EMS VPP API 仕様説明書](vpp-api-v1.md)
+**本編**: [ENECloud EMS VPP API 説明書](vpp-api-v1.md)
 
-> 本書は [VPP API 仕様説明書](vpp-api-v1.md) のリクエスト／レスポンスのサンプル集です。
+> 本書は [VPP API 説明書](vpp-api-v1.md) のリクエスト／レスポンスのサンプル集です。
 > フィールドの定義・制約・バリデーションは本編の該当節を参照してください。
 
 ---

@@ -16,7 +16,7 @@
 
 1 サイト = 1 連系点単位の制御・計測・スケジュール管理 API。
 
-[📘 API リファレンス（Redoc）](ems-v2.html){ .md-button .md-button--primary }
+[📘 API リファレンス](ems-v2.html){ .md-button .md-button--primary }
 [説明書](ems-openapi-v2.md){ .md-button }
 [サンプル集](ems-openapi-v2-samples.md){ .md-button }
 [OpenAPI YAML](openapi/ems-openapi-v2.yaml){ .md-button }
@@ -28,7 +28,7 @@
 複数の物理 EMS（1 VPP あたり最大 100 メンバー）を 1 つの VPP（仮想発電所）として束ねる API。
 監視・精算のデータ取得は VPP API のみで完結します。
 
-[📘 API リファレンス（Redoc）](vpp-v1.html){ .md-button .md-button--primary }
+[📘 API リファレンス](vpp-v1.html){ .md-button .md-button--primary }
 [説明書](vpp-api-v1.md){ .md-button }
 [サンプル集](vpp-api-v1-samples.md){ .md-button }
 [OpenAPI YAML](openapi/vpp-openapi-v1.yaml){ .md-button }
@@ -39,7 +39,7 @@
 
 既存インテグレーションとの互換性のために維持されている版です。新規開発では v2 を使用してください。
 
-[📘 API リファレンス（Redoc）](ems-v1.html){ .md-button }
+[📘 API リファレンス](ems-v1.html){ .md-button }
 [説明書](ems-openapi-v1.md){ .md-button }
 [OpenAPI YAML](openapi/ems-openapi-v1.yaml){ .md-button }
 
