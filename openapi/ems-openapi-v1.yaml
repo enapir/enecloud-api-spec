@@ -29,7 +29,7 @@ info:
     定格電力 1999 kW（充電/放電）、定格容量 8360 kWh、
     運用 SOC 範囲 10-90 %（実効容量 6688 kWh）。
   contact:
-    name: 株式会社ナピル ソリューション事業部
+    name: 株式会社ナピル ソリューション事業部 EMS開発担当
   license:
     name: CC BY 4.0
     url: https://creativecommons.org/licenses/by/4.0/
@@ -37,12 +37,16 @@ info:
 servers:
   - url: '{baseUrl}'
     description: |
-      Base URL（本番／テスト環境のホスト名）は公開仕様には含めません。
+      API 本体の Base URL（本番／テスト環境のホスト名）は公開仕様には含めません。
       ご契約時に個別提供される値を baseUrl に設定してください。
+
+      注: この server は /v1/ems/{ems_id}/ 配下のエンドポイントにのみ適用される。
+      /auth/refresh は別ホスト（認証ホスト）で提供されるため、当該オペレーション側の
+      servers（authBaseUrl）で上書きされる。
     variables:
       baseUrl:
-        default: 'https://HOST'
-        description: 契約時に個別提供される Base URL（例 https://HOST）
+        default: 'https://API-HOST'
+        description: 契約時に個別提供される API 本体の Base URL（例 https://API-HOST）
 
 security:
   - bearerAuth: []
@@ -71,12 +75,23 @@ paths:
 
   /auth/refresh:
     post:
+      servers:
+        - url: '{authBaseUrl}'
+          description: |
+            認証ホスト。API 本体（baseUrl）とは別ホストで提供され、
+            パスプレフィックス（/v1/ems/{ems_id}/）も使用しない。
+            ご契約時に API 本体の Base URL と併せて個別提供される。
+          variables:
+            authBaseUrl:
+              default: 'https://AUTH-HOST'
+              description: 契約時に個別提供される認証ホストの Base URL（例 https://AUTH-HOST）
       tags: [Auth]
       summary: Access Token 取得
       description: |
         Refresh Token から Access Token（JWT、30 日有効）を取得する。
 
         - この API のみ `/v1/ems/{ems_id}/` プレフィックスを使用しない
+        - この API のみ API 本体とは**別ホスト**（認証ホスト）で提供される
         - Authorization ヘッダーには **Refresh Token** を指定する
         - レスポンスの `access_token` を以降の全 API 呼び出しで使用する
       operationId: refreshToken

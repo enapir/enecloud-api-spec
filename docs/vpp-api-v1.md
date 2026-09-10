@@ -1,16 +1,17 @@
 # ENECloud EMS VPP API 仕様説明書
 
-**バージョン**: 1.3
+**バージョン**: 1.4
 **ステータス**: **正式版（Released）**
-**最終更新日**: 2026年7月25日
-**提供**: 株式会社ナピル
+**最終更新日**: 2026年9月10日
+**作成者**: 株式会社ナピル ソリューション事業部 EMS開発担当
 **ライセンス**: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — 出典表示のもと、引用・再配布・本仕様に準拠した実装が可能です。
 **OpenAPI 定義**: [`openapi/vpp-openapi-v1.yaml`](../openapi/vpp-openapi-v1.yaml)
 
 > ### 本書の位置づけ
 >
-> 本書は **VPP API v1**（パスプレフィックス `/v1/vpp/{vpp_id}/`）の仕様です。複数の物理 EMS（最大 100 メンバー）を仮想 EMS として束ねます。
-> 物理 EMS API [v2](ems-openapi-v2.md) と一体で運用する前提です（**VPP v1.3 ↔ 物理EMS v2.2**）。
+> 本書は **VPP API v1**（パスプレフィックス `/v1/vpp/{vpp_id}/`）の仕様です。
+> 本 API は、複数の物理 EMS（1 VPP あたり最大 100 メンバー）を **1 つの VPP（仮想発電所）** として束ね、アグリゲーターが単一インターフェースで一括制御・計測できるようにします。
+> 物理 EMS API [v2](ems-openapi-v2.md) と一体で運用する前提です（**VPP v1.4 ↔ 物理 EMS v2.2**）。
 >
 > アグリゲーターのデータ取得（監視・精算）は **VPP API のみで完結** します（v1.3 原則）。
 
@@ -22,11 +23,11 @@
    - 1.1 [VPP（Virtual Power Plant）の目的](#11-vppvirtual-power-plantの目的)
    - 1.2 [アグリゲーター向け推奨パターン](#12-アグリゲーター向け推奨パターン)
    - 1.3 [電力分配の基本動作](#13-電力分配の基本動作)
-   - 1.4 [用語・フィールド対応表（VPP API ⇔ 物理EMS API）](#14-用語フィールド対応表vpp-api--物理ems-api)
+   - 1.4 [用語・フィールド対応表（VPP API ⇔ 物理 EMS API）](#14-用語フィールド対応表vpp-api--物理-ems-api)
 2. [基本情報](#2-基本情報)
    - 2.1 [Base URL](#21-base-url)
    - 2.2 [認証](#22-認証)
-   - 2.3 [電力種別](#23-電力種別)
+   - 2.3 [電力種別・データ形式](#23-電力種別データ形式)
    - 2.4 [レートリミット](#24-レートリミット)
 3. [API 一覧](#3-api-一覧)
 4. [メンバー管理 API](#4-メンバー管理-api)
@@ -54,16 +55,18 @@
 
 ### 1.1 VPP（Virtual Power Plant）の目的
 
-本 API は、複数の物理 EMS（蓄電池・発電所など）を **VPP（仮想 EMS）** として束ね、  
+本 API は、複数の物理 EMS（蓄電池・発電所など）を **1 つの VPP（仮想発電所）** として束ね、  
 VPP アグリゲーターが単一インターフェースで一括制御できる API です。
+
+> **VPP は API 上で物理 EMS と同じ形をしています**: VPP API は物理 EMS API と**同じ JSON 構造・同じフィールド名**を採用するため（[§1.4 用語・フィールド対応表](#14-用語フィールド対応表vpp-api--物理-ems-api)）、クライアントは VPP を 1 台の EMS と同じ要領で扱えます。差分は members 関連フィールドの有無のみです。
 
 ```mermaid
 graph TB
     AGG[アグリゲーター]
-    VPP["VPP（仮想EMS）"]
-    A["物理EMS-A<br/>battery"]
-    B["物理EMS-B<br/>generator"]
-    C["物理EMS-C<br/>consumer"]
+    VPP["VPP（仮想発電所）"]
+    A["物理 EMS-A<br/>battery"]
+    B["物理 EMS-B<br/>generator"]
+    C["物理 EMS-C<br/>consumer"]
 
     AGG -->|VPP API| VPP
     VPP --> A
@@ -74,7 +77,7 @@ graph TB
 ### 1.2 アグリゲーター向け推奨パターン
 
 > **アグリゲーターは VPP API を唯一のインターフェースとして使用することを推奨**。物理 EMS が 1 台のみの場合も、VPP に 1 メンバーとして登録することで以下のメリットが得られる:
-> - **API 表面の統一**: VPP API は EMS API と**同じ JSON 構造・同じフィールド名**を採用し、差分は **members 関連フィールド**（`vpp_id` / `members[]` / `member_baselines[]` / `uncovered_kw`）の有無のみ。電力系の値フィールド（`current_kw` / `baseline_kw` / `delta_kw` / `dispatched_delta_kw` / `fcr_response_kw` / `compound_breakdown` / `import_*_available` / `export_*_available` 等）は両 API で完全同名（[§1.4 用語・フィールド対応表](#14-用語フィールド対応表vpp-api--物理ems-api)参照）
+> - **API 表面の統一**: VPP API は EMS API と**同じ JSON 構造・同じフィールド名**を採用し、差分は **members 関連フィールド**（`vpp_id` / `members[]` / `member_baselines[]` / `uncovered_kw`）の有無のみ。電力系の値フィールド（`current_kw` / `baseline_kw` / `delta_kw` / `dispatched_delta_kw` / `fcr_response_kw` / `compound_breakdown` / `import_*_available` / `export_*_available` 等）は両 API で完全同名（[§1.4 用語・フィールド対応表](#14-用語フィールド対応表vpp-api--物理-ems-api)参照）
 > - **将来の拡張性**: 1 台 → 複数台への移行時、クライアント実装の変更不要（VPP にメンバー追加するのみ）
 > - **役割分離の明確化**: VPP = アグリゲーターの境界 / 物理 EMS = 個別リソースの境界
 >
@@ -109,13 +112,13 @@ VPPは登録された全メンバーを常時分配対象とする。
 
 - `in_service` かつ `allocation_weight>0` のメンバーを `allocation_weight` に従って自動按分
 - メンバーが `out_of_service` になった場合、残りの `in_service` かつ `weight>0` のメンバーで自動再按分
-- 60秒周期で各EMS の運転計画（物理EMS APIで管理）を参照し再按分
+- 60秒周期で各EMS の運転計画（物理 EMS APIで管理）を参照し再按分
 
-> 運転計画（30分刻みのin/out_of_service・baseline）は物理EMS APIで1台ずつ管理する。VPP APIは運転計画エンドポイントを持たない。
+> 運転計画（30分刻みのin/out_of_service・baseline）は物理 EMS APIで1台ずつ管理する。VPP APIは運転計画エンドポイントを持たない。
 >
 > **60秒周期再按分の適用範囲**: 再按分の対象は**メンバーの `status`（in/out_of_service）変化のみ**。`allocation_weight`・`label` の変更およびメンバー削除は実行中の指令には反映されない（次回指令から、[§6 注意事項](#6-有効電力制御-controlactive_power) 参照）。実行中の再按分結果は `/status/details` の `members[].active_power.dispatched_delta_kw` で確認する（指令レスポンスの `uncovered_kw` は配信時点のスナップショットであり更新されない）。
 
-### 1.4 用語・フィールド対応表（VPP API ⇔ 物理EMS API）
+### 1.4 用語・フィールド対応表（VPP API ⇔ 物理 EMS API）
 
 **設計原則**: VPP API は物理 EMS API と**同じ JSON 構造・同じフィールド名**を採用する。差分は members 関連フィールド（`vpp_id` / `members[]` / `member_baselines[]` / `uncovered_kw`）の有無のみ。同一フィールド名でも出現場所により意味が変わる点を下表で一覧化する。
 
@@ -156,7 +159,7 @@ VPPは登録された全メンバーを常時分配対象とする。
 | `member_baselines[]` | – | – | – | VPP `/control/active_power` **リクエスト必須**。全 `in_service` メンバーの `baseline_kw` を指定 |
 | `uncovered_kw` | – | – | – | VPP `/control/active_power` レスポンス、能力超過等で配分できなかった残量 |
 
-> **符号規則**: 両 API とも連系点基準（受電 = 正、送電 = 負）。物理EMS API [§4.1](ems-openapi-v2.md#41-連系点基準の符号規則) と完全一致。
+> **符号規則**: 両 API とも連系点基準（受電 = 正、送電 = 負）。物理 EMS API [§4.1](ems-openapi-v2.md#41-連系点基準の符号規則) と完全一致。
 
 ---
 
@@ -167,15 +170,21 @@ VPPは登録された全メンバーを常時分配対象とする。
 > **Base URL について**: 本番／テスト環境のホスト名は公開仕様には含めません。ご契約時に個別提供します。
 > 以下ではパスプレフィックス以降を記述します。
 
-パスプレフィックス: `/v1/vpp/{vpp_id}/`
+| 区分 | ホスト | パス |
+|------|--------|------|
+| 通常API | `{APIホスト}` | `/v1/vpp/{vpp_id}/` |
+| 認証API | **`{認証ホスト}`（別ホスト）** | `/auth/refresh` |
 
-- `{vpp_id}`: VPP ID（16バイトUUID = 32文字hex（ハイフン無し）、物理EMS IDと同形式）
+- `{vpp_id}`: VPP ID（16バイトUUID = 32文字hex（ハイフン無し）、物理 EMS IDと同形式）
 - VPP IDはEMS運用担当が払い出し
-- **VPP API のパスプレフィックスは `/v1/vpp/`**（物理EMS API は `/v2/ems/`）。両 API は独立したバージョン体系を持つが、運用時は **VPP v1.3 ↔ 物理EMS v2.2** の組み合わせで使用する前提
+- **VPP API のパスプレフィックスは `/v1/vpp/`**（物理 EMS API は `/v2/ems/`）。両 API は独立したバージョン体系を持つが、運用時は **VPP v1.4 ↔ 物理 EMS v2.2** の組み合わせで使用する前提
+- **例**: `/status` を呼び出す場合 → `{APIホスト}/v1/vpp/{vpp_id}/status`
+
+> ⚠️ **`/auth/refresh` のみ URL 体系が異なります**: `/v1/vpp/{vpp_id}/` プレフィックスを**使用せず**、かつ **`{APIホスト}` とは別の `{認証ホスト}`** で提供されます（`{認証ホスト}/auth/refresh`）。`{APIホスト}/v1/vpp/{vpp_id}/auth/refresh` ではありません。物理 EMS API [§2 Base URL](ems-openapi-v2.md#base-url) と共通の扱いで、`{認証ホスト}` は `{APIホスト}` と併せてご契約時に個別提供します。
 
 ### 2.2 認証
 
-既存の`/auth/refresh`を使用。Refresh TokenはVPP IDに紐付いたものを使用。
+物理 EMS API と共通の `/auth/refresh`（**`{認証ホスト}` 上、プレフィックス無し**。[§2.1 Base URL](#21-base-url) 参照）を使用します。Refresh Token は VPP ID に紐付いたものを使用してください。取得した Access Token は `{APIホスト}/v1/vpp/{vpp_id}/` 配下の全 API で使用します。
 
 ```mermaid
 sequenceDiagram
@@ -191,18 +200,20 @@ sequenceDiagram
 
 ### VPP ID仕様
 
-既存の物理EMS ID（[EMS §2 Base URL](ems-openapi-v2.md#base-url) 参照）と同形式:
+既存の物理 EMS ID（[EMS §2 Base URL](ems-openapi-v2.md#base-url) 参照）と同形式:
 - **形式**: **16 バイト UUID（32 文字 hex、ハイフン無し）**
 - **例**: `f1b2c3d4e5f6789012345678901234ab`（32 文字 hex）
 - **文字種**: `0-9`, `a-f`（小文字）
 
-### 2.3 電力種別
+### 2.3 電力種別・データ形式
 
-**本仕様の電力・電力量フィールドはすべて有効電力 (Active Power, kW) ベース**。物理EMS API [§5.1 データ形式](ems-openapi-v2.md#51-データ形式) と整合。無効電力 (kvar)・皮相電力 (kVA)・力率は本 API のスコープ外（EMS制御装置側で自律管理）。
+**本仕様の電力・電力量フィールドはすべて有効電力 (Active Power, kW) ベース**。物理 EMS API [§5.1 データ形式](ems-openapi-v2.md#51-データ形式) と整合。無効電力 (kvar)・皮相電力 (kVA)・力率は本 API のスコープ外（EMS制御装置側で自律管理）。
+
+単位・数値精度（kW / kWh は小数第 1 位まで）・日時形式（ISO 8601 UTC、末尾 `Z` 必須）・ID 形式も物理 EMS API [§5.1](ems-openapi-v2.md#51-データ形式) と同一です。本書のサンプルは **`2026-04-04` を基準日**として記述しています（物理 EMS API 仕様書は `2025-06-13` を基準日とします）。
 
 ### HTTP ヘッダー規約
 
-物理EMS API [§2 HTTP ヘッダー規約](ems-openapi-v2.md#http-ヘッダー規約) と同形式。
+物理 EMS API [§2 HTTP ヘッダー規約](ems-openapi-v2.md#http-ヘッダー規約) と同形式。
 
 #### リクエストヘッダー
 
@@ -224,17 +235,18 @@ sequenceDiagram
 
 ### 2.4 レートリミット
 
-物理EMS APIと同様の制限を基本としつつ、**参照系と制御系を独立したバケット**で管理する（参照ポーリングの消費が市場応動時の制御を阻害しないため）。
+物理 EMS APIと同様の制限を基本としつつ、**参照系と制御系を独立したバケット**で管理する（参照ポーリングの消費が市場応動時の制御を阻害しないため）。
 
 | 項目 | 値 |
 |------|-----|
 | 参照系上限 | 1000回 / 1時間（VPP ID単位）。対象: `/members` GET・`/status`・`/status/details`・`/control/active_power/schedules` GET・`/measurements/active_power`・`/measurements/energy`（計 6 エンドポイント）|
 | 制御系上限 | 200回 / 1時間（VPP ID単位、参照系とは**独立したバケット**）。対象: `/members` POST・`/members/{ems_id}` POST・`/members/{ems_id}` DELETE・`/control/active_power` POST・`/control/active_power/schedules` DELETE（計 5 エンドポイント）|
+| 認証（`/auth/refresh`）| 1000回 / 1時間（**Refresh Token 単位**、上記 2 バケットとは独立）。別ホスト（`{認証ホスト}`）のため VPP ID 単位のバケットには計上されない |
 | リセット周期 | 1時間（スライディングウィンドウ） |
 
 > `X-RateLimit-*` レスポンスヘッダーは、呼び出したエンドポイントが属するバケットの値を返す。
 
-> `/auth/refresh` は VPP ID に紐付く Refresh Token単位で別途レートリミットが適用される（物理EMS API と共通の制限）。詳細は [ems-openapi-v2.md §5.2](ems-openapi-v2.md#52-レートリミット) 参照。
+> `/auth/refresh` は VPP ID に紐付く Refresh Token 単位で、物理 EMS API と共通のレートリミット（1000 回/時）が適用される。詳細は [ems-openapi-v2.md §5.2](ems-openapi-v2.md#52-レートリミット) 参照。
 
 **レスポンスヘッダー**:
 
@@ -268,14 +280,14 @@ sequenceDiagram
 
 ## 3. API 一覧
 
-> **認証エンドポイント** `/auth/refresh` は物理EMS API と共通（[ems-openapi-v2.md §9.1](ems-openapi-v2.md#91-認証-authrefresh) 参照）。VPP用 Refresh Token を使用して Access Token を取得し、本表のVPPエンドポイント呼び出しに `Authorization: Bearer {access_token}` で付与する。
+> **認証エンドポイント** `/auth/refresh` は物理 EMS API と共通（[ems-openapi-v2.md §9.1](ems-openapi-v2.md#91-認証-authrefresh) 参照）。VPP用 Refresh Token を使用して Access Token を取得し、本表のVPPエンドポイント呼び出しに `Authorization: Bearer {access_token}` で付与する。
 
 | 章 | カテゴリ | エンドポイント | メソッド | 概要 |
 |---|----------|---------------|----------|------|
-| 4.1 | **メンバー管理** | `/members` | GET | 物理EMS一覧取得 |
-| 4.2 | **メンバー管理** | `/members` | POST | 物理EMS登録 |
-| 4.3 | **メンバー管理** | `/members/{ems_id}` | POST | 物理EMSパラメータ更新 |
-| 4.4 | **メンバー管理** | `/members/{ems_id}` | DELETE | 物理EMS削除 |
+| 4.1 | **メンバー管理** | `/members` | GET | 物理 EMS一覧取得 |
+| 4.2 | **メンバー管理** | `/members` | POST | 物理 EMS登録 |
+| 4.3 | **メンバー管理** | `/members/{ems_id}` | POST | 物理 EMSパラメータ更新 |
+| 4.4 | **メンバー管理** | `/members/{ems_id}` | DELETE | 物理 EMS削除 |
 | 5 | **リアルタイム状態（概要）** | `/status` | GET | 配下EMS集計状態の**概要**（一覧監視用、最小フィールド）|
 | 5 | **リアルタイム状態（詳細）** | `/status/details` | GET | 配下EMS集計状態の**詳細**（ドリルダウン用、全フィールド + 各メンバーの詳細）。`?include_components=true` で `multi_component` メンバーの component 個別状態も返却可 |
 | 6 | **有効電力制御** | `/control/active_power` | POST | 有効電力指令（即座指示・スケジュール登録、kW 系）。`member_baselines[]` を**全メンバー分必須指定**（VPP は baseline を保管しない）。無効電力指令は将来 `/control/reactive_power` で別途追加予定 |
@@ -296,7 +308,7 @@ VPP 配下の物理 EMS（メンバー）の登録・更新・削除・参照を
 GET /v1/vpp/{vpp_id}/members
 ```
 
-**概要**: VPPに登録されている物理EMS一覧を確認
+**概要**: VPPに登録されている物理 EMS一覧を確認
 
 ### レスポンス例
 
@@ -351,15 +363,15 @@ GET /v1/vpp/{vpp_id}/members
 | 項目名 | 型 | 単位 | 説明 |
 |--------|------|------|------|
 | `vpp_id` | string | - | VPP識別子 |
-| `members` | array | - | 物理EMS一覧 |
-| `total_count` | integer | - | 登録済み物理EMS数 |
+| `members` | array | - | 物理 EMS一覧 |
+| `total_count` | integer | - | 登録済み物理 EMS数 |
 | `timestamp` | string | - | API応答時刻（ISO 8601形式） |
 
 **members配列要素**:
 
 | 項目名 | 型 | 説明 |
 |--------|------|------|
-| `ems_id` | string | 物理EMS識別子（16バイトUUID = 32文字hex（ハイフン無し）） |
+| `ems_id` | string | 物理 EMS識別子（16バイトUUID = 32文字hex（ハイフン無し）） |
 | `label` | string | 識別用ラベル（登録時に設定） |
 | `resource_type` | string | リソース種別（`battery`: 蓄電池、`generator`: 発電所、`consumer`: 需要家、`multi_component`: `components.length ≥ 2` のサイト） |
 | `allocation_weight` | number | 分配重み（デフォルト 100）。実分配比率 = weight_i / Σweight（in_service かつ weight>0 のメンバー合計）で計算 |
@@ -375,7 +387,7 @@ GET /v1/vpp/{vpp_id}/members
 POST /v1/vpp/{vpp_id}/members
 ```
 
-**概要**: VPPに物理EMSを追加登録
+**概要**: VPPに物理 EMSを追加登録
 
 ### リクエストパラメータ
 
@@ -390,14 +402,14 @@ POST /v1/vpp/{vpp_id}/members
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|------|------|------|
-| `ems_id` | string | 必須 | 登録する物理EMS ID（16バイトUUID = 32文字hex（ハイフン無し）） |
+| `ems_id` | string | 必須 | 登録する物理 EMS ID（16バイトUUID = 32文字hex（ハイフン無し）） |
 | `label` | string | 任意 | 識別用ラベル（最大64文字） |
 | `resource_type` | string | 必須 | リソース種別（`battery` / `generator` / `consumer` / `multi_component`）。物理 EMS API（[ems-openapi-v2.md §3.1](ems-openapi-v2.md#31-統一リソースモデルcomponents-ベース)）の `components[]` 構成と整合: 単機サイトは `component_type` 値（battery / generator / consumer）、`components.length ≥ 2` のサイトは `multi_component`。登録時、VPP は当該 `ems_id` の物理 EMS `/specifications` と突合し、`components` 構成と不一致の場合は 400（`resource_type_mismatch`）|
 | `allocation_weight` | number | 任意 | 分配重み（0〜999999.9）。省略時は100。合計制約なし。**`0`を設定すると登録を維持したまま分配から除外**（一時停止用途）。実分配比率 = weight_i / Σweight（in_serviceかつweight>0） |
 
 > **ベースラインは VPP に保管しない**: 登録時にもパラメータ更新時にもベースライン値は指定できない。VPP `/control/active_power` 指令時に `member_baselines[]` で必須指定する（[§6.1 baseline_kw について](#61-baseline_kw-について) 参照）。
 
-> **`measurement_point` は登録時に指定不可**。物理EMS API `/specifications` で **EMS運用担当が制度・運用ルールに基づき審査・管理する静的属性**であり、VPP 側は読み取り専用（物理EMS API [`/specifications`](ems-openapi-v2.md#93-仕様情報-specifications) で参照）。計測点（`grid` = 受電点 / `device` = 機器点）の変更が必要な場合は、物理EMS API `/specifications` 側で EMS運用担当に申請すること。詳細は [ems-openapi-v2.md §3.6](ems-openapi-v2.md#36-計測点受電点--機器点) 参照。
+> **`measurement_point` は登録時に指定不可**。物理 EMS API `/specifications` で **EMS運用担当が制度・運用ルールに基づき審査・管理する静的属性**であり、VPP 側は読み取り専用（物理 EMS API [`/specifications`](ems-openapi-v2.md#93-仕様情報-specifications) で参照）。計測点（`grid` = 受電点 / `device` = 機器点）の変更が必要な場合は、物理 EMS API `/specifications` 側で EMS運用担当に申請すること。詳細は [ems-openapi-v2.md §3.6](ems-openapi-v2.md#36-計測点受電点--機器点) 参照。
 
 **resource_type の値**:
 
@@ -421,7 +433,7 @@ POST /v1/vpp/{vpp_id}/members
 - 台数変動（追加・削除・停止）時も他メンバーの`allocation_weight`変更不要
 
 **登録上限**:
-- 1VPPに登録できる物理EMS数は**最大100台**
+- 1VPPに登録できる物理 EMS数は**最大100台**
 - 上限超過時は400エラー
 
 **複数 VPP への重複登録の禁止**:
@@ -451,9 +463,9 @@ POST /v1/vpp/{vpp_id}/members
 |--------|------|
 | **400** | `ems_id`の形式不正 |
 | **400** | `resource_type`の値不正 |
-| **400** | `resource_type`が物理EMSの`components`構成と不一致（`resource_type_mismatch`）|
+| **400** | `resource_type`が物理 EMSの`components`構成と不一致（`resource_type_mismatch`）|
 | **400** | 登録上限（100台）を超過 |
-| **400** | 指定した`ems_id`の物理EMSが存在しない（`ems_not_found`）|
+| **400** | 指定した`ems_id`の物理 EMSが存在しない（`ems_not_found`）|
 | **409** | 指定した`ems_id`は既に登録済み |
 | **409** | 指定した`ems_id`は他のVPPに登録済み（`ems_registered_to_other_vpp`）|
 
@@ -480,7 +492,7 @@ POST /v1/vpp/{vpp_id}/members
 POST /v1/vpp/{vpp_id}/members/{ems_id}
 ```
 
-**概要**: 登録済み物理EMSの`allocation_weight`・`label`を更新する。`ems_id`・`resource_type`は変更不可。ベースライン値はメンバー単位では保持しない（指令時に `member_baselines[]` で指定）。
+**概要**: 登録済み物理 EMSの`allocation_weight`・`label`を更新する。`ems_id`・`resource_type`は変更不可。ベースライン値はメンバー単位では保持しない（指令時に `member_baselines[]` で指定）。
 
 ### リクエストパラメータ
 
@@ -529,14 +541,14 @@ POST /v1/vpp/{vpp_id}/members/{ems_id}
 DELETE /v1/vpp/{vpp_id}/members/{ems_id}
 ```
 
-**概要**: VPPから物理EMSを削除（物理EMSそのものは削除しない）
+**概要**: VPPから物理 EMSを削除（物理 EMSそのものは削除しない）
 
 ### パスパラメータ
 
 | パラメータ | 説明 |
 |-----------|------|
 | `vpp_id` | VPP ID |
-| `ems_id` | 削除する物理EMS ID |
+| `ems_id` | 削除する物理 EMS ID |
 
 ### レスポンス例
 
@@ -561,7 +573,7 @@ DELETE /v1/vpp/{vpp_id}/members/{ems_id}
 
 ## 5. リアルタイム状態取得 `/status` `/status/details`
 
-VPP状態取得は **2 階層構成**（物理EMS API [§9.2](ems-openapi-v2.md#92-リアルタイム状態取得-status-statusdetails) と整合）:
+VPP状態取得は **2 階層構成**（物理 EMS API [§9.2](ems-openapi-v2.md#92-リアルタイム状態取得-status-statusdetails) と整合）:
 
 | エンドポイント | 用途 | レスポンス |
 |---|---|---|
@@ -575,10 +587,10 @@ GET /v1/vpp/{vpp_id}/status
 GET /v1/vpp/{vpp_id}/status/details
 ```
 
-**概要 (`/status`)**: 配下の物理EMS全体の集計状態の最小フィールドを返却（一覧監視用）
+**概要 (`/status`)**: 配下の物理 EMS全体の集計状態の最小フィールドを返却（一覧監視用）
 **詳細 (`/status/details`)**: 集計値の全フィールド + 各メンバーの詳細（精算・履行評価用）
 
-> **`resource_type` は `/status` `/status/details` のいずれでも返却しない**（静的属性のため [VPP §4.1 GET `/members`](#41-get-members一覧取得) または物理EMS API [`/specifications`](ems-openapi-v2.md#93-仕様情報-specifications) で取得）。VPPメンバー一覧の解釈には EMS 登録時に取得した値を保持して利用する（物理EMS API §9.2 と同方針）。
+> **`resource_type` は `/status` `/status/details` のいずれでも返却しない**（静的属性のため [VPP §4.1 GET `/members`](#41-get-members一覧取得) または物理 EMS API [`/specifications`](ems-openapi-v2.md#93-仕様情報-specifications) で取得）。VPPメンバー一覧の解釈には EMS 登録時に取得した値を保持して利用する（物理 EMS API §9.2 と同方針）。
 
 ### レスポンス例（概要 `/status`）
 
@@ -588,8 +600,8 @@ GET /v1/vpp/{vpp_id}/status/details
   "status": 0,                           // 0: in service, 9: out of service
   "fcr_active": 0,                       // 配下に FCR 自立運転中の EMS が1台以上存在
   "dr_active": 0,                        // 配下に DR 削減モード実行中の EMS が1台以上存在
-  "import_energy_available": 5690,   // [kWh] battery かつ稼働中のみ合算
-  "export_energy_available": 8198,   // [kWh] battery かつ稼働中のみ合算
+  "import_energy_available": 5690.0,   // [kWh] battery かつ稼働中のみ合算
+  "export_energy_available": 8198.0,   // [kWh] battery かつ稼働中のみ合算
   "import_power_available": 75.0,    // [kW] 稼働中のみ合算
   "export_power_available": 90.0,    // [kW] 稼働中のみ合算
   "current_kw": -29.4,             // [kW] 全体現在電力
@@ -606,8 +618,8 @@ GET /v1/vpp/{vpp_id}/status/details
       "baseline_kw": 0.0,
       "delta_kw": -29.4,
       "dispatched_delta_kw": -24.5,
-      "import_energy_available": 2090,
-      "export_energy_available": 4598,
+      "import_energy_available": 2090.0,
+      "export_energy_available": 4598.0,
       "import_power_available": 30.0,
       "export_power_available": 45.0,
       "output_control_limit": 100,
@@ -636,8 +648,8 @@ GET /v1/vpp/{vpp_id}/status/details
       "baseline_kw": 0.0,
       "delta_kw": 0.0,
       "dispatched_delta_kw": -24.5,
-      "import_energy_available": 3600,
-      "export_energy_available": 3600,
+      "import_energy_available": 3600.0,
+      "export_energy_available": 3600.0,
       "import_power_available": 45.0,
       "export_power_available": 45.0,
       "output_control_limit": 100,
@@ -655,7 +667,7 @@ GET /v1/vpp/{vpp_id}/status/details
 
 #### 概要
 
-精算・履行評価・ドリルダウン分析用途で、VPP 全体の集計値と配下メンバーの**運用状態の全フィールド**を意味別ブロックに整理して返却する（物理EMS API [§9.2.2](ems-openapi-v2.md#922-statusdetails-詳細) と同形式）。
+精算・履行評価・ドリルダウン分析用途で、VPP 全体の集計値と配下メンバーの**運用状態の全フィールド**を意味別ブロックに整理して返却する（物理 EMS API [§9.2.2](ems-openapi-v2.md#922-statusdetails-詳細) と同形式）。
 
 **クエリパラメータ**:
 
@@ -732,7 +744,7 @@ VPP 集計値（top-level）も配下メンバー（`members[]` 各要素）も�
 
 > **VPP 集計値とメンバーの対称構造**: 集計値（top-level）もメンバー（`members[]` 各要素）も**完全に同じフィールド名・同じ 5 ブロック構造**で返却する。集計値の意味は「配下 `in_service` メンバーの稼働中合算」、メンバーの意味は「当該物理 EMS の値」と文脈で区別する。同名・同構造によりクライアントは集計値・メンバーを共通パーサーで処理可能。
 
-> **将来枠の扱い**: `reactive_power` / `tso_dispatch_detail` ブロックは本仕様では **キー自体が存在しない**（`null` ではなく**ブロック非存在**）。物理EMS API `/specifications` の `reactive_power_capable: true` / `tso_dispatch_capable: true` のリソースで実装完了後に返却対象となる。
+> **将来枠の扱い**: `reactive_power` / `tso_dispatch_detail` ブロックは本仕様では **キー自体が存在しない**（`null` ではなく**ブロック非存在**）。物理 EMS API `/specifications` の `reactive_power_capable: true` / `tso_dispatch_capable: true` のリソースで実装完了後に返却対象となる。
 
 > **静的属性は本 API では返却しない**: `resource_type` は VPP `/members` 取得（[§4.1](#41-get-members一覧取得)）で、`fcr_capable` / `dr_capable` / `voltage_class` / `measurement_point` / `contract_kw` / `site_*_max_kw` / `generator_kind` / `marketable` 等の `/specifications` 由来の静的属性は物理 EMS API [`/specifications`](ems-openapi-v2.md#93-仕様情報-specifications) で取得。クライアントは登録時に取得した静的属性をキャッシュし、`/status/details` 応答の解釈に利用する設計。
 
@@ -755,8 +767,8 @@ VPP 集計値（top-level）も配下メンバー（`members[]` 各要素）も�
     "fcr_response_kw": null              // [kW] VPP 全体の FCR 応動可能量、active_sku=fcr または active_sku=compound で FCR を含む場合に非null
   },
   "capacity": {
-    "import_energy_available": 5690,   // [kWh] battery かつ稼働中のみ合算
-    "export_energy_available": 8198,   // [kWh] battery かつ稼働中のみ合算
+    "import_energy_available": 5690.0,   // [kWh] battery かつ稼働中のみ合算
+    "export_energy_available": 8198.0,   // [kWh] battery かつ稼働中のみ合算
     "import_power_available": 75.0,    // [kW] 稼働中のみ合算
     "export_power_available": 90.0     // [kW] 稼働中のみ合算
   },
@@ -784,8 +796,8 @@ VPP 集計値（top-level）も配下メンバー（`members[]` 各要素）も�
         "output_control_reason": null
       },
       "capacity": {
-        "import_energy_available": 2090,
-        "export_energy_available": 4598,
+        "import_energy_available": 2090.0,
+        "export_energy_available": 4598.0,
         "import_power_available": 30.0,
         "export_power_available": 45.0
       },
@@ -841,8 +853,8 @@ VPP 集計値（top-level）も配下メンバー（`members[]` 各要素）も�
         "output_control_reason": null
       },
       "capacity": {
-        "import_energy_available": 3600,
-        "export_energy_available": 3600,
+        "import_energy_available": 3600.0,
+        "export_energy_available": 3600.0,
         "import_power_available": 45.0,
         "export_power_available": 45.0
       },
@@ -859,7 +871,7 @@ VPP 集計値（top-level）も配下メンバー（`members[]` 各要素）も�
 
 **集計値（VPP全体）**:
 
-凡例: 階層列の **概要** = `/status` と `/status/details` の両方で返却 / **詳細** = `/status/details` のみ返却。**詳細階層は意味グループ別ブロック**（`active_power` / `capacity` / `resource_state` / 将来 `reactive_power` / `tso_dispatch_detail`）に分割（物理EMS API §9.2.2 と整合）。
+凡例: 階層列の **概要** = `/status` と `/status/details` の両方で返却 / **詳細** = `/status/details` のみ返却。**詳細階層は意味グループ別ブロック**（`active_power` / `capacity` / `resource_state` / 将来 `reactive_power` / `tso_dispatch_detail`）に分割（物理 EMS API §9.2.2 と整合）。
 
 | 項目名 | 型 | 単位 | 階層 | グループ | 説明 |
 |--------|------|------|:----:|:----:|------|
@@ -867,7 +879,7 @@ VPP 集計値（top-level）も配下メンバー（`members[]` 各要素）も�
 | `status` | integer | - | 概要 | top | VPP状態（0: in service, 9: out of service）|
 | `has_warning` | integer | - | 概要 | top | 配下に1台でも警告メンバー（`has_warning=1`）が存在すると 1（OR 集約）|
 | `active_sku` | string\|null | - | 詳細 | top | VPP レベルで現在応動中の SKU。全 `in_service` メンバーで一致する場合のみ当該値、不一致時は `"mixed"`（複数 SKU 並行応動中）、全メンバー `null` なら `null`（**複合応動中は `"compound"`**、[ems-openapi-v2.md §7.2](ems-openapi-v2.md#72-sku-フィールドの命名規則) 参照）|
-| `members` | array | - | 概要 | top | 物理EMS個別状態一覧（下記 members 配列要素表参照）|
+| `members` | array | - | 概要 | top | 物理 EMS個別状態一覧（下記 members 配列要素表参照）|
 | `timestamp` | string | - | 概要 | top | API応答時刻（ISO 8601形式） |
 | `active_power.current_kw` | number | kW | 概要 | active_power | 全体現在電力（全resource_type・稼働中のみ合算、受電+/送電-）|
 | `active_power.fcr_active` | integer | - | 概要 | active_power | 配下に `fcr_capable: true` かつ有効化中の EMS が 1 台以上存在（OR 集約）|
@@ -881,7 +893,7 @@ VPP 集計値（top-level）も配下メンバー（`members[]` 各要素）も�
 | `capacity.export_power_available` | number | kW | 概要 | capacity | 全体送電可能電力（稼働中のみ合算。全 resource_type 含む）|
 | `resource_state.dr_active` | integer | - | 概要 | resource_state | 配下に DR 削減モード実行中の consumer / `multi_component` メンバーが 1 台以上存在（OR 集約）|
 
-> **注**: 概要 `/status` ではブロック構造を取らず**フラット返却**（`current_kw` / `baseline_kw` / `delta_kw` / `dispatched_delta_kw` / `fcr_active` / `dr_active` / `import_*_available` / `export_*_available` / `has_warning` を top-level に直接返却）。詳細 `/status/details` のみ上記の階層構造で返却する（物理EMS API §9.2.2 の方針と整合）。
+> **注**: 概要 `/status` ではブロック構造を取らず**フラット返却**（`current_kw` / `baseline_kw` / `delta_kw` / `dispatched_delta_kw` / `fcr_active` / `dr_active` / `import_*_available` / `export_*_available` / `has_warning` を top-level に直接返却）。詳細 `/status/details` のみ上記の階層構造で返却する（物理 EMS API §9.2.2 の方針と整合）。
 
 **VPP status 判定仕様**:
 
@@ -898,15 +910,15 @@ flowchart TD
 
 **members 配列要素**:
 
-凡例: 階層列の **概要** = `/status` と `/status/details` の両方で返却 / **詳細** = `/status/details` のみ返却。**詳細階層では意味グループ別ブロック**（`active_power` / `capacity` / `resource_state` / 将来 `reactive_power` / `tso_dispatch_detail`）に分割（物理EMS API §9.2.2 と整合）。
+凡例: 階層列の **概要** = `/status` と `/status/details` の両方で返却 / **詳細** = `/status/details` のみ返却。**詳細階層では意味グループ別ブロック**（`active_power` / `capacity` / `resource_state` / 将来 `reactive_power` / `tso_dispatch_detail`）に分割（物理 EMS API §9.2.2 と整合）。
 
 | 項目名 | 型 | 単位 | 適用 resource_type | 階層 | グループ | 説明 |
 |--------|------|------|:-----------------:|:----:|:----:|------|
-| `ems_id` | string | - | 全 | 概要 | top | 物理EMS識別子 |
+| `ems_id` | string | - | 全 | 概要 | top | 物理 EMS識別子 |
 | `label` | string | - | 全 | 詳細 | top | 識別用ラベル |
 | `allocation_weight` | number | - | 全 | 詳細 | top | 分配重み（VPPメンバー登録時の値）。実分配比率 = weight_i / Σweight（in_service かつ weight>0）|
 | `status` | integer | - | 全 | 概要 | top | 状態（0: in service, 9: out of service）|
-| `has_warning` | integer | - | 全 | 概要 | top | 警告フラグ（0: なし、1: あり）。物理EMS API `/status` の `has_warning` のパススルー値 |
+| `has_warning` | integer | - | 全 | 概要 | top | 警告フラグ（0: なし、1: あり）。物理 EMS API `/status` の `has_warning` のパススルー値 |
 | `active_sku` | string\|null | - | 全 | 詳細 | top | 当該メンバーが現在応動中の SKU（非応動時 `null`、**複合応動中は `"compound"`**）|
 | `last_dispatch_status` | string\|null | - | 全 | 詳細 | top | 直近の指令結果（`dispatched` / `skipped_out_of_service` / `skipped_incompatible` / `skipped_weight_zero` / `skipped_baseline_missing` / `failed` / `pending` / `null`）|
 | `measure_timestamp` | string | - | 全 | 概要 | top | 計測時刻（ISO 8601 形式）|
@@ -929,7 +941,7 @@ flowchart TD
 | `resource_state.irradiance_w_m2` | number\|null | W/m² | generator (PV) のみ | 詳細 | resource_state | 日射強度（任意、日射計を備える場合のみ非null）|
 | `components` | array | - | `multi_component` のみ | 詳細（`?include_components=true` 指定時のみ）| top | component 個別の現在状態配列。各要素は物理 EMS API [§9.2.2](ems-openapi-v2.md#922-statusdetails-詳細) の `components[]` と同一定義（`component_id` / `component_type` / `status` + `active_power` / `capacity` / `resource_state` ブロックのサブセット）。蓄電池の充放電電力・PV の発電電力・component 別 `soc` はここで取得 |
 
-> **概要 `/status` では members 要素もフラット返却**（`active_power.*` / `capacity.*` / `resource_state.*` を `current_kw` / `fcr_active` / `import_*_available` / `dr_active` 等として top-level に直接返却）。詳細 `/status/details` のみ上記の階層構造で返却（物理EMS API §9.2.2 の方針と整合）。
+> **概要 `/status` では members 要素もフラット返却**（`active_power.*` / `capacity.*` / `resource_state.*` を `current_kw` / `fcr_active` / `import_*_available` / `dr_active` 等として top-level に直接返却）。詳細 `/status/details` のみ上記の階層構造で返却（物理 EMS API §9.2.2 の方針と整合）。
 
 > **詳細属性の参照先**: 各メンバーの **`fcr_capable` / `dr_capable` / `generator_kind` / `voltage_class` / `measurement_point` / `contract_kw` / `site_import_max_kw` / `site_export_max_kw` / `marketable`** 等の**静的仕様属性**は物理 EMS API `/specifications`（`site_capability` / `site_constraints` / `components[]`）で参照すること（VPP メンバー登録時に取得・キャッシュする運用を推奨）。VPP `/status` `/status/details` では運用状態（active 系・量的フィールド）のみ返却する。`resource_type` / `label` / `allocation_weight` 等の VPP メンバー登録情報は VPP メンバー管理 API（[§4 メンバー管理 API](#4-メンバー管理-api)）で参照。
 
@@ -976,10 +988,10 @@ VPP 指令前に、アグリゲーターは各メンバーの `baseline_kw` を�
 ```mermaid
 flowchart LR
     AGG[アグリゲーター]
-    EMS_B["物理EMS<br/>(consumer)<br/>GET /baseline"]
+    EMS_B["物理 EMS<br/>(consumer)<br/>GET /baseline"]
     PLAN["運用計画<br/>(アグリゲーター側)"]
     VPP["VPP API<br/>POST /control/active_power<br/>member_baselines 必須"]
-    EMS_A["物理EMS<br/>(各メンバー)"]
+    EMS_A["物理 EMS<br/>(各メンバー)"]
 
     EMS_B -.->|30分CBL| AGG
     PLAN -.->|発電/運転計画| AGG
@@ -1001,14 +1013,14 @@ VPP `/status` / `/status/details` の `baseline_kw` や `members[].baseline_kw` 
 - `consumer`: `/baseline` 登録値（30 分スロット該当値）
 - `battery` / `generator` / `multi_component`: 直近の `/control/active_power` schedule の `baseline_kw` 入力値
 
-`/serviceplan.baseline_kw`（物理EMS API）は VPP 配下でも参照可能（運転計画の確認用）。
+`/serviceplan.baseline_kw`（物理 EMS API）は VPP 配下でも参照可能（運転計画の確認用）。
 
 #### 例: ベースライン活用（蓄電所A・需要家B）
 
 ```
 指令時の member_baselines[] 構築:
-  蓄電所A: 物理EMSの schedule baseline = 0.0 kW（充放電なし）
-  需要家B: 物理EMSの GET /baseline 該当 30分スロット = +30.0 kW（通常消費）
+  蓄電所A: 物理 EMSの schedule baseline = 0.0 kW（充放電なし）
+  需要家B: 物理 EMSの GET /baseline 該当 30分スロット = +30.0 kW（通常消費）
 
 指令値: delta_kw = -49.0 kW（VPP全体、2台均等）
 member_baselines = [
@@ -1053,7 +1065,7 @@ member_baselines = [{ ems_id: "X", baseline_kw: -1500.0 }]
 ```json
 {
   "type": "schedule",
-  "fcr_response_kw": 3000,
+  "fcr_response_kw": 3000.0,
   "start_time": "2026-04-04T14:00:00Z",
   "end_time": "2026-04-04T20:00:00Z",
   "sku": "fcr",
@@ -1130,12 +1142,12 @@ member_baselines = [{ ems_id: "X", baseline_kw: -1500.0 }]
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|------|------|------|
-| `ems_id` | string | 必須 | 対象の物理EMS ID（VPP登録済み、`in_service` メンバー）|
+| `ems_id` | string | 必須 | 対象の物理 EMS ID（VPP登録済み、`in_service` メンバー）|
 | `baseline_kw` | number | 必須 | ベースライン電力値（kW）（-999999.9〜999999.9）。`consumer` メンバーは物理 EMS `/baseline` の該当 30 分スロット値、`generator` / `battery` はアグリの運転計画値 |
 
 #### バリデーション一覧
 
-物理EMS API [§9.4 バリデーション](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と整合する形で、VPP レベルの整合性チェックは以下の通り実施。
+物理 EMS API [§9.4 バリデーション](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と整合する形で、VPP レベルの整合性チェックは以下の通り実施。
 
 | 条件 | エラーコード | error_type | 対処 |
 |------|:----:|------------|------|
@@ -1163,15 +1175,15 @@ VPP は配下メンバーの種別不一致を **エラーではなく、各メ�
 | メンバーの `allocation_weight: 0` | `skipped_weight_zero` | 一時除外 |
 | FCR で `fcr_capable: false` メンバー | `skipped_incompatible` | 残 fcr_capable メンバーで按分 |
 | 上げ指令で `generator` / `consumer` メンバー（受電不可）| `skipped_incompatible` | battery メンバーで再按分 |
-| 上げ指令で `site_export_max_kw=0` の `multi_component` メンバー（受電不可）| `skipped_incompatible` | 同上 |
+| 上げ指令で `site_import_max_kw=0` の `multi_component` メンバー（受電不可）| `skipped_incompatible` | 同上 |
 | FIT 区分の generator メンバーへ市場応札 SKU | `skipped_incompatible` | FIT 電源は市場応札不可（`site_capability.marketable: []`、物理 EMS [§9.4](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と整合）|
-| `consumer` 単機メンバーへ `jepx-da` / `jepx-ttv` 等の送電系SKU | `skipped_incompatible` | 逆潮流不可（物理EMS [§9.4 逆潮流規制](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と整合）|
+| `consumer` 単機メンバーへ `jepx-da` / `jepx-ttv` 等の送電系SKU | `skipped_incompatible` | 逆潮流不可（物理 EMS [§9.4 逆潮流規制](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と整合）|
 
-> **配下メンバー単位の物理EMS API バリデーション結果**: 各メンバーへの配信時、物理EMS API の `/control/active_power` 側のバリデーション（`sku_not_marketable`、`reverse_power_flow_forbidden` 等）に該当した場合、VPP は当該メンバーを `skipped_incompatible` として扱い、`skip_reason` に物理EMS側の `error_type` を格納した上で `uncovered_kw` に積算する。VPP リクエスト全体は 200 OK で受理される。
+> **配下メンバー単位の物理 EMS API バリデーション結果**: 各メンバーへの配信時、物理 EMS API の `/control/active_power` 側のバリデーション（`sku_not_marketable`、`reverse_power_flow_forbidden` 等）に該当した場合、VPP は当該メンバーを `skipped_incompatible` として扱い、`skip_reason` に物理 EMS側の `error_type` を格納した上で `uncovered_kw` に積算する。VPP リクエスト全体は 200 OK で受理される。
 
-**物理EMS側エラーのVPPでの扱い**:
+**物理 EMS側エラーのVPPでの扱い**:
 
-| 物理EMS応答 | VPP側の扱い |
+| 物理 EMS応答 | VPP側の扱い |
 |---|---|
 | 400 / 409 / 422 系バリデーション（`sku_not_marketable` / `dr_cooldown_active` / `dr_duplicate_dispatch` / `baseline_not_configured` / `reverse_power_flow_forbidden` 等）| `dispatch_status: skipped_incompatible` + `skip_reason` に当該 `error_type` を格納、`uncovered_kw` に積算 |
 | 通信断・タイムアウト・5xx | 派生 `Idempotency-Key` で最大 3 回再試行 → 失敗確定で `dispatch_status: failed` + `skip_reason` に `delivery_failed` を格納、`uncovered_kw` に積算 |
@@ -1202,9 +1214,9 @@ dispatched_kw(i)   = baseline_kw(i) + delta_kw(i)
 | `delta_kw` の符号 | `generator` / `consumer` への扱い | `multi_component` への扱い | `dispatch_status` |
 |------------------|----------------------------------|-------------------|-------------------|
 | 負（下げ/発電/削減） | 通常通り分配 | 通常通り分配（サイト合計として処理） | `dispatched` または `skipped_*` |
-| 正（上げ） | 分配スキップ（受電不可）。残余を `battery` および受電可 `multi_component` で再按分 | `site_export_max_kw>0` の場合は受電可として扱う。`site_import_max_kw=0` のサイトは分配スキップ | generator/consumer: `skipped_incompatible`、受電不可 `multi_component`: `skipped_incompatible` |
+| 正（上げ） | 分配スキップ（受電不可）。残余を `battery` および受電可 `multi_component` で再按分 | `site_import_max_kw>0` の場合は受電可として扱う。`site_import_max_kw=0` のサイトは分配スキップ | generator/consumer: `skipped_incompatible`、受電不可 `multi_component`: `skipped_incompatible` |
 
-> **`multi_component` の上げ指令対応**: `multi_component` メンバーに battery component が含まれている場合、サイトレベルで受電可能（site_kw > 0 の方向）。consumer のみで構成された逆潮流不可サイトは、上げ指令時もサイト内 battery component で受電できる場合のみ参加可能。詳細は物理 EMS API（[ems-openapi-v2.md §3.1](ems-openapi-v2.md#31-統一リソースモデルcomponents-ベース)）参照。
+> **`multi_component` の上げ指令対応**: 上げ指令（`delta_kw > 0` = 受電方向）の可否は **`site_import_max_kw`** で判定する（`site_export_max_kw` は送電＝逆潮流側の制約であり、上げ指令の可否判定には用いない。物理 EMS API [§3.4](ems-openapi-v2.md#34-逆潮流可否の判定) 参照）。`multi_component` メンバーに battery component が含まれる場合はサイトレベルで受電可能（`site_kw > 0` の方向）。consumer component のみで構成されたサイトは上げ指令の分配対象外（`skipped_incompatible`）。詳細は物理 EMS API（[ems-openapi-v2.md §3.1](ems-openapi-v2.md#31-統一リソースモデルcomponents-ベース)）参照。
 
 **上げ指令時のbattery再按分式**:
 
@@ -1267,18 +1279,18 @@ uncovered_kw = 3000 - (800 + 1100 + 1100) = 0  // 完全補完
 - **分配可能メンバーが存在しない場合（全員`out_of_service`または`allocation_weight=0`、FCR時は `fcr_capable: true` メンバーが0台）は503エラー**
 - 指令値が各EMSの定格を超えた場合はクリップし`uncovered_kw`に積算
 - スケジュール実行中に`/members/{ems_id}`でパラメータ変更・削除を行っても、**実行中スケジュールへの影響はない**（変更は次回指令から反映）。削除の場合、実行中スケジュール完了後にメンバーが除外される
-- **`immediate` の `duration_minutes` 終了後**: 各物理EMSは待機状態（`delta_kw = 0`）に移行する。VPP APIからの明示的な待機指令は不要
-- **`immediate` と `schedule` の競合（同一時刻に両者が存在する場合）**: **schedule 優先**。`immediate` 実行中に `schedule` の開始時刻が到来した場合は `schedule` へ自動遷移する（物理EMS API [§9.4 即座指示の `duration_minutes` 終了後の挙動](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と同方針）。下記の後勝ちルール（schedule 同士の重複解決）とは別概念
+- **`immediate` の `duration_minutes` 終了後**: 各物理 EMSは待機状態（`delta_kw = 0`）に移行する。VPP APIからの明示的な待機指令は不要
+- **`immediate` と `schedule` の競合（同一時刻に両者が存在する場合）**: **schedule 優先**。`immediate` 実行中に `schedule` の開始時刻が到来した場合は `schedule` へ自動遷移する（物理 EMS API [§9.4 即座指示の `duration_minutes` 終了後の挙動](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と同方針）。下記の後勝ちルール（schedule 同士の重複解決）とは別概念
 - **`type: schedule` 実行時の baseline 欠落**: 実行時再評価で `in_service` となったメンバーに `member_baselines[]` の該当エントリが無い場合、当該メンバーは **`skipped_baseline_missing`** としてスキップし、残メンバーで自動再按分する（VPP は baseline を保管・補完しない）
 - **同一時間帯のスケジュール重複**: `type: schedule` を再登録した場合、後勝ちルールで上書き。完全一致時は `schedule_id` を引き継ぐ（新ID発番なし）。中間部分重複・前半重複・後半重複・完全包含のケースでは複数 `schedule_id` が発番される。レスポンスの `affected_schedules` 配列で全 ID と動作（`created` / `inherited` / `split` / `deleted`）を返却する
-- **実行中スケジュールへの上書き POST**: 後勝ち上書きは実行中のスケジュールにも適用可能。新規 `start_time` は現在時刻+1分以降（物理EMS API §8.2）のため、実行中スケジュールは interval splitting により**実行済み部分（既存 ID 継承、実績として保持）と置換部分**に分割される。削除制約（実行中・開始 1 分前以内・完了済みの DELETE 不可、409）は **DELETE にのみ適用**され、上書き POST には適用されない（GC 指令の当日変更を可能にするため）
+- **実行中スケジュールへの上書き POST**: 後勝ち上書きは実行中のスケジュールにも適用可能。新規 `start_time` は現在時刻+1分以降（物理 EMS API §8.2）のため、実行中スケジュールは interval splitting により**実行済み部分（既存 ID 継承、実績として保持）と置換部分**に分割される。削除制約（実行中・開始 1 分前以内・完了済みの DELETE 不可、409）は **DELETE にのみ適用**され、上書き POST には適用されない（GC 指令の当日変更を可能にするため）
 - **後勝ちルールの適用範囲**（「異なる市場応札 SKU 同士のみ併存、それ以外は上書き」）:
   - 同一期間 + **異なる市場応札 SKU 同士**（**`jepx-da` ⇄ `jepx-ttv` を除く**。例: `frr` ⇄ `rr`、`compound` ⇄ `rr-fit`、`compound` ⇄ `frr`）→ **併存可能**（別 `schedule_id` で並列記録、複合商品 `compound` と単独 SKU の同時保有を成立させるため）
-  - 同一期間 + **`jepx-da` ⇄ `jepx-ttv`** → **上書き**（同一の kWh ディスパッチカテゴリとして扱う、5 ケース処理。物理EMS API [§9.5.1](ems-openapi-v2.md#951-スケジュール重複時の動作後勝ちルール) / [§10.3](ems-openapi-v2.md#103-jepx-時間前市場jepx-ttv) と整合）
+  - 同一期間 + **`jepx-da` ⇄ `jepx-ttv`** → **上書き**（同一の kWh ディスパッチカテゴリとして扱う、5 ケース処理。物理 EMS API [§9.5.1](ems-openapi-v2.md#951-スケジュール重複時の動作後勝ちルール) / [§10.3](ems-openapi-v2.md#103-jepx-時間前市場jepx-ttv) と整合）
   - 同一期間 + **同一 SKU**（`fcr` / `s-frr` / `frr` / `rr` / `rr-fit` / `jepx-da` / `jepx-ttv` / `negawatt-spot` / `compound`）→ **上書き**（5 ケース処理）
   - 同一期間 + **`sku: null` 同士** → **上書き**（5 ケース処理）
   - 同一期間 + **`null` ⇄ 市場応札 SKU** → **上書き**（運用指令と市場応動の同時走行による二重駆動を防ぐため）
-  - 詳細は物理EMS API [§9.5.1](ems-openapi-v2.md#951-スケジュール重複時の動作後勝ちルール) 参照
+  - 詳細は物理 EMS API [§9.5.1](ems-openapi-v2.md#951-スケジュール重複時の動作後勝ちルール) 参照
 
 **`uncovered_kw != 0.0` 時の処理方針**:
 
@@ -1298,7 +1310,7 @@ uncovered_kw = 3000 - (800 + 1100 + 1100) = 0  // 完全補完
 
 ### 冪等性（Idempotency-Key）
 
-物理EMS API [§9.4 冪等性](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と同形式で `Idempotency-Key` ヘッダーをサポート。クライアント側のリトライ処理によって同一指令が重複配信されることを防ぐ。
+物理 EMS API [§9.4 冪等性](ems-openapi-v2.md#94-有効電力制御-controlactive_power) と同形式で `Idempotency-Key` ヘッダーをサポート。クライアント側のリトライ処理によって同一指令が重複配信されることを防ぐ。
 
 #### スコープ
 - **VPP ID 単位** で管理（同一キーでも別 VPP なら独立）
@@ -1314,7 +1326,7 @@ uncovered_kw = 3000 - (800 + 1100 + 1100) = 0  // 完全補完
 | 同一キー＋**異なる**リクエスト本文 | **409 Conflict**（`error_type: idempotency_conflict`）|
 | 24 時間経過後の再送 | 新規リクエストとして処理（再配信される）|
 
-> **VPP配下メンバーへの伝播**: VPP `/control/active_power` の冪等性キーは VPP API レイヤーで管理される。物理EMS API への配信時、VPP は各メンバーにも独立した `Idempotency-Key`（VPPキーから派生した値）を付与し、メンバー側の重複配信も防ぐ。アグリゲーターがこのキー設計を意識する必要はない。
+> **VPP配下メンバーへの伝播**: VPP `/control/active_power` の冪等性キーは VPP API レイヤーで管理される。物理 EMS API への配信時、VPP は各メンバーにも独立した `Idempotency-Key`（VPPキーから派生した値）を付与し、メンバー側の重複配信も防ぐ。アグリゲーターがこのキー設計を意識する必要はない。
 
 ### レスポンス例
 
@@ -1412,7 +1424,7 @@ uncovered_kw = 3000 - (800 + 1100 + 1100) = 0  // 完全補完
   "message": "FCR schedule registered successfully.",
   "control_type": "schedule",
   "delta_kw": null,
-  "fcr_response_kw": 3000,
+  "fcr_response_kw": 3000.0,
   "sku": "fcr",
   "schedule_id": "vsch_fcr_001",
   "start_time": "2026-04-04T14:00:00Z",
@@ -1423,7 +1435,7 @@ uncovered_kw = 3000 - (800 + 1100 + 1100) = 0  // 完全補完
       "ems_id": "a1b2c3d4e5f6789012345678901234ab",
       "label": "蓄電所A",
       "allocation_weight": 100,
-      "fcr_response_kw": 1500,
+      "fcr_response_kw": 1500.0,
       "baseline_kw": 0.0,
       "delta_kw": null,
       "dispatch_status": "pending"
@@ -1441,7 +1453,7 @@ uncovered_kw = 3000 - (800 + 1100 + 1100) = 0  // 完全補完
       "ems_id": "c3d4e5f6789012345678901234abcdef",
       "label": "蓄電所C",
       "allocation_weight": 100,
-      "fcr_response_kw": 1500,
+      "fcr_response_kw": 1500.0,
       "baseline_kw": 0.0,
       "delta_kw": null,
       "dispatch_status": "pending"
@@ -1470,22 +1482,22 @@ uncovered_kw = 3000 - (800 + 1100 + 1100) = 0  // 完全補完
 | `start_time` | string | - | 開始時刻（scheduleのみ） |
 | `end_time` | string | - | 終了時刻（scheduleのみ） |
 | `affected_schedules` | array | - | スケジュール重複解決の影響を受けた全スケジュール一覧。`schedule_id` / `action`（`created`/`inherited`/`split`/`deleted`）/ `start_time` / `end_time` を返却（scheduleのみ、後勝ちルール適用時）|
-| `members` | array | - | 各物理EMSへの分配結果 |
+| `members` | array | - | 各物理 EMSへの分配結果 |
 | `timestamp` | string | - | API応答時刻（ISO 8601形式） |
 
 **members配列要素**:
 
 | 項目名 | 型 | 単位 | 説明 |
 |--------|------|------|------|
-| `ems_id` | string | - | 物理EMS識別子 |
+| `ems_id` | string | - | 物理 EMS識別子 |
 | `label` | string | - | 識別用ラベル |
 | `allocation_weight` | number | - | 指令時点の分配重み（監査証跡用） |
 | `fcr_response_kw` | number\|null | kW | その物理 EMS への FCR 応動可能量配分（双方向幅、絶対値）。**`sku: "fcr"` または `sku: "compound"` で FCR を含む場合に非 null、それ以外は `null`**。`fcr_capable: false` メンバーは `null`（`skipped_incompatible`）|
 | `baseline_kw` | number | kW | 今回の指令で使用したベースライン電力値。**スキップ時も返す**（決済・計量用途のため）|
 | `delta_kw` | number\|null | kW | ベースラインからの変化量（ΔkW、連系点目標電力 = `baseline_kw + delta_kw` で派生）。正: 上げ, 負: 下げ。**FCR 以外で値あり**。**スキップ時は `null`**（指令なし）。**`pending` の場合は登録時計算値（予定値）**。`sku: "compound"` 時は複合 ΔkW 約定量の配分 |
 | `compound_breakdown` | object\|null | kW | 当該メンバーへの複合商品容量内訳（**リクエストの top-level `compound_breakdown` を `allocation_weight` で按分した結果**、参考情報）。**`sku: "compound"` でクライアント指定時のみ非 null、それ以外およびスキップ時は `null`**。キー: `fcr_response_kw` / `s-frr` / `frr` / `rr`（[ems-openapi-v2.md §7.4](ems-openapi-v2.md#74-複合商品-compound) 参照）|
-| `dispatch_status` | string | - | `dispatched`（配信済）/ `skipped_out_of_service`（停止中のためスキップ）/ `skipped_incompatible`（指令種別非対応でスキップ、FCR で `fcr_capable: false` のメンバー含む）/ `skipped_weight_zero`（`allocation_weight=0`のためスキップ）/ `skipped_baseline_missing`（schedule 実行時再評価で baseline 未指定）/ `failed`（物理EMSへの配信失敗: 通信断・5xx・リトライ上限到達。失敗分は `uncovered_kw` に積算）/ `pending`（スケジュール登録済み・未実行、scheduleのみ） |
-| `skip_reason` | string\|null | - | `skipped_incompatible` / `failed` 時の詳細。物理EMS API の `error_type`（`sku_not_marketable` / `dr_cooldown_active` / `baseline_not_configured` / `reverse_power_flow_forbidden` 等）または `delivery_failed` を格納。それ以外は `null` |
+| `dispatch_status` | string | - | `dispatched`（配信済）/ `skipped_out_of_service`（停止中のためスキップ）/ `skipped_incompatible`（指令種別非対応でスキップ、FCR で `fcr_capable: false` のメンバー含む）/ `skipped_weight_zero`（`allocation_weight=0`のためスキップ）/ `skipped_baseline_missing`（schedule 実行時再評価で baseline 未指定）/ `failed`（物理 EMSへの配信失敗: 通信断・5xx・リトライ上限到達。失敗分は `uncovered_kw` に積算）/ `pending`（スケジュール登録済み・未実行、scheduleのみ） |
+| `skip_reason` | string\|null | - | `skipped_incompatible` / `failed` 時の詳細。物理 EMS API の `error_type`（`sku_not_marketable` / `dr_cooldown_active` / `baseline_not_configured` / `reverse_power_flow_forbidden` 等）または `delivery_failed` を格納。それ以外は `null` |
 
 ### エラーレスポンス
 
@@ -1541,7 +1553,7 @@ VPP スケジュールの一覧取得・削除を行う API 群。
 GET /v1/vpp/{vpp_id}/control/active_power/schedules
 ```
 
-**概要**: VPP全体（配下の物理EMS含む）のスケジュール一覧を取得
+**概要**: VPP全体（配下の物理 EMS含む）のスケジュール一覧を取得
 
 ### 取得範囲
 
@@ -1561,7 +1573,7 @@ GET /v1/vpp/{vpp_id}/control/active_power/schedules
 
 > 取得範囲外を指定した場合は 400 エラー（`schedule_query_out_of_range`）。
 >
-> **ページネーション非対応**: 物理EMS API [§9.5.2](ems-openapi-v2.md#952-スケジュール取得-get-controlactive_powerschedules) と同じく、本 API もページネーションをサポートしない。取得範囲を最大 120 日（過去30日 + 未来90日）に制限することで、単一レスポンスで完結する設計。1 VPP あたりのスケジュール件数は実運用上数百件以下を想定。
+> **ページネーション非対応**: 物理 EMS API [§9.5.2](ems-openapi-v2.md#952-スケジュール取得-get-controlactive_powerschedules) と同じく、本 API もページネーションをサポートしない。取得範囲を最大 120 日（過去30日 + 未来90日）に制限することで、単一レスポンスで完結する設計。1 VPP あたりのスケジュール件数は実運用上数百件以下を想定。
 
 ### レスポンス例
 
@@ -1632,21 +1644,21 @@ GET /v1/vpp/{vpp_id}/control/active_power/schedules
 | `end_time` | string | - | 終了時刻（ISO 8601形式） |
 | `created_at` | string | - | 登録時刻（ISO 8601形式） |
 | `uncovered_kw` | number | kW | 能力超過等で配分できなかった電力量。`delta_kw`と同じ符号。0.0 = 完全補完。**`pending`の場合は登録時計算値（予定値）** |
-| `members` | array | - | 各物理EMSへの分配情報 |
+| `members` | array | - | 各物理 EMSへの分配情報 |
 
 **members配列要素**:
 
 | 項目名 | 型 | 単位 | 説明 |
 |--------|------|------|------|
-| `ems_id` | string | - | 物理EMS識別子 |
+| `ems_id` | string | - | 物理 EMS識別子 |
 | `label` | string | - | 識別用ラベル |
 | `allocation_weight` | number | - | 指令時点の分配重み（監査証跡用） |
 | `fcr_response_kw` | number\|null | kW | その物理 EMS への FCR 応動可能量配分（双方向幅、絶対値）。**`sku: "fcr"` または `sku: "compound"` で FCR を含む場合に非 null、それ以外は `null`**。`fcr_capable: false` メンバーは `null`（`skipped_incompatible`）|
 | `baseline_kw` | number | kW | 今回の指令で使用したベースライン電力値。**スキップ時も返す**（決済・計量用途のため） |
 | `delta_kw` | number\|null | kW | ベースラインからの変化量（ΔkW、連系点目標電力 = `baseline_kw + delta_kw` で派生）。正: 上げ, 負: 下げ。**FCR 以外で値あり、FCR 時は `null`**。**スキップ時は `null`**（指令なし）。**`pending` の場合は登録時計算値（予定値）**。`sku: "compound"` 時は複合 ΔkW 約定量 |
 | `compound_breakdown` | object\|null | kW | 当該メンバーへの複合商品容量内訳（参考情報）。**`sku: "compound"` でクライアント指定時のみ非 null**、それ以外およびスキップ時は `null`。キー: `fcr_response_kw` / `s-frr` / `frr` / `rr`（[ems-openapi-v2.md §7.4](ems-openapi-v2.md#74-複合商品-compound) 参照）|
-| `dispatch_status` | string | - | `dispatched`（配信済）/ `skipped_out_of_service`（停止中のためスキップ）/ `skipped_incompatible`（指令種別非対応でスキップ、FCR で `fcr_capable: false` のメンバー含む）/ `skipped_weight_zero`（`allocation_weight=0`のためスキップ）/ `skipped_baseline_missing`（schedule 実行時再評価で baseline 未指定）/ `failed`（物理EMSへの配信失敗）/ `pending`（スケジュール登録済み・未実行） |
-| `skip_reason` | string\|null | - | `skipped_incompatible` / `failed` 時の詳細（物理EMS API の `error_type` または `delivery_failed`）。それ以外は `null` |
+| `dispatch_status` | string | - | `dispatched`（配信済）/ `skipped_out_of_service`（停止中のためスキップ）/ `skipped_incompatible`（指令種別非対応でスキップ、FCR で `fcr_capable: false` のメンバー含む）/ `skipped_weight_zero`（`allocation_weight=0`のためスキップ）/ `skipped_baseline_missing`（schedule 実行時再評価で baseline 未指定）/ `failed`（物理 EMSへの配信失敗）/ `pending`（スケジュール登録済み・未実行） |
+| `skip_reason` | string\|null | - | `skipped_incompatible` / `failed` 時の詳細（物理 EMS API の `error_type` または `delivery_failed`）。それ以外は `null` |
 
 ---
 
@@ -1656,7 +1668,7 @@ GET /v1/vpp/{vpp_id}/control/active_power/schedules
 DELETE /v1/vpp/{vpp_id}/control/active_power/schedules?schedule_id={schedule_id}
 ```
 
-**概要**: VPPスケジュールを削除（配下の全物理EMSに対応する個別スケジュールも連動削除）
+**概要**: VPPスケジュールを削除（配下の全物理 EMSに対応する個別スケジュールも連動削除）
 
 ### クエリパラメータ
 
@@ -1696,7 +1708,7 @@ VPP 配下メンバーの時系列データ・累積電力量を取得する API
 POST /v1/vpp/{vpp_id}/measurements/active_power
 ```
 
-**概要**: VPP配下の各物理EMSの電力値（kW）時系列データをメンバー別に一括取得する。
+**概要**: VPP配下の各物理 EMSの電力値（kW）時系列データをメンバー別に一括取得する。
 
 **保管期間**: **60 日**（それ以前のデータは取得不可、404）。**サンプリング間隔**: `1` / `60` / `1800` / `3600` / `86400` 秒の 5 値。
 
@@ -1717,7 +1729,7 @@ POST /v1/vpp/{vpp_id}/measurements/active_power
 | `start_time` | string | 必須 | 取得開始時刻（ISO 8601形式、**過去 60 日以内**。それ以前は 404） |
 | `end_time` | string | 必須 | 取得終了時刻（ISO 8601形式）。取得期間は最大31日 |
 | `interval_seconds` | integer | 任意 | サンプリング間隔（秒）。**`1`（高頻度）/ `60` / `1800` / `3600` / `86400` の 5 値のみ**指定可（それ以外は 400 `invalid_parameter`）。省略時は 60。期間との組み合わせで時系列ポイント数が44,640以下になること。物理 EMS API [§9.7](ems-openapi-v2.md#97-瞬時電力履歴-measurementsactive_power) と同一 |
-| `ems_ids` | array | 任意 | 取得対象メンバー（物理EMS ID）の絞り込み。省略時は全登録メンバー。複合上限（下記）の評価も指定メンバー数で行う |
+| `ems_ids` | array | 任意 | 取得対象メンバー（物理 EMS ID）の絞り込み。省略時は全登録メンバー。複合上限（下記）の評価も指定メンバー数で行う |
 | `include_components` | boolean | 任意 | `true` 指定時、`multi_component` メンバーの `members[]` 要素に `components[]`（component 個別値）を含めて返却。デフォルト `false`（従来動作）。レスポンスサイズが component 数に比例して増加するため、`ems_ids` での絞り込み併用を推奨 |
 
 ### レスポンス例
@@ -1798,7 +1810,7 @@ POST /v1/vpp/{vpp_id}/measurements/active_power
 >
 > **`actual_frequency` は VPP top-level に含まれない**: 系統周波数は合算が意味を成さないため、メンバー側（`members[].actual_frequency`）のみで返却する。同一系統上のメンバーは同じ値を観測するため、クライアントは任意メンバーの値を参照すればよい。物理 EMS API `/measurements/active_power` の `data[]` 要素と**同じフィールド構成** + `members[]` の追加（および `actual_frequency` のメンバー側のみ）が差分。
 
-> **`current_kw` / `delta_kw` / `baseline_kw` の関係**: `current_kw` は連系点での実測絶対電力（受電+/送電-）、`baseline_kw` は基準電力、`delta_kw` は両者の差分（市場約定量＝連系点単方向Δ電力 = `current_kw - baseline_kw`、FCR以外で値あり、FCR時は `null`）。物理EMS API [§4.2](ems-openapi-v2.md#42-電力フィールドの関係式) と同義。
+> **`current_kw` / `delta_kw` / `baseline_kw` の関係**: `current_kw` は連系点での実測絶対電力（受電+/送電-）、`baseline_kw` は基準電力、`delta_kw` は両者の差分（市場約定量＝連系点単方向Δ電力 = `current_kw - baseline_kw`、FCR以外で値あり、FCR時は `null`）。物理 EMS API [§4.2](ems-openapi-v2.md#42-電力フィールドの関係式) と同義。
 
 ### レスポンス項目定義
 
@@ -1832,11 +1844,11 @@ POST /v1/vpp/{vpp_id}/measurements/active_power
 
 | 項目名 | 型 | 単位 | battery | generator | consumer | multi_component | 説明 |
 |--------|------|------|:-:|:-:|:-:|:-:|------|
-| `ems_id` | string | - | ✓ | ✓ | ✓ | ✓ | 物理EMS識別子 |
-| `current_kw` | number | kW | ✓ | ✓ | ✓ | ✓ | **連系点絶対電力**（実測、受電+/送電-）。物理EMS API の `current_kw` と同義 |
+| `ems_id` | string | - | ✓ | ✓ | ✓ | ✓ | 物理 EMS識別子 |
+| `current_kw` | number | kW | ✓ | ✓ | ✓ | ✓ | **連系点絶対電力**（実測、受電+/送電-）。物理 EMS API の `current_kw` と同義 |
 | `baseline_kw` | number | kW | ✓ | ✓ | ✓ | ✓ | ベースライン電力値（存在しない場合は0.0として扱う）|
-| `delta_kw` | number\|null | kW | ✓ | ✓ | ✓ | ✓ | **実測差分** = `current_kw - baseline_kw`。FCR時は `null`。物理EMS API [§4.2](ems-openapi-v2.md#42-電力フィールドの関係式) の `delta_kw` と同義 |
-| `dispatched_delta_kw` | number\|null | kW | ✓ | ✓ | ✓ | ✓ | **その時点で配信されていた指令Δ電力**（時系列達成度分析用）。指令未配信時刻・FCR時は `null`。`delta_kw / dispatched_delta_kw` で時系列達成度を算出可能。物理EMS API [§9.7](ems-openapi-v2.md#97-瞬時電力履歴-measurementsactive_power) と同値 |
+| `delta_kw` | number\|null | kW | ✓ | ✓ | ✓ | ✓ | **実測差分** = `current_kw - baseline_kw`。FCR時は `null`。物理 EMS API [§4.2](ems-openapi-v2.md#42-電力フィールドの関係式) の `delta_kw` と同義 |
+| `dispatched_delta_kw` | number\|null | kW | ✓ | ✓ | ✓ | ✓ | **その時点で配信されていた指令Δ電力**（時系列達成度分析用）。指令未配信時刻・FCR時は `null`。`delta_kw / dispatched_delta_kw` で時系列達成度を算出可能。物理 EMS API [§9.7](ems-openapi-v2.md#97-瞬時電力履歴-measurementsactive_power) と同値 |
 | `fcr_response_kw` | number\|null | kW | △ | △ | △ | △ | FCR 応動可能量（双方向幅、絶対値）。`active_sku: "fcr"` または `active_sku: "compound"` で FCR を含む場合に非null、`/specifications.fcr_capable: true` のみ意味を持つ |
 | `compound_breakdown` | object\|null | kW | △ | △ | △ | △ | その時点で当該メンバーに配信されていた複合商品容量内訳（参考情報、登録時にクライアント指定があった場合のみ）。キー: `fcr_response_kw` / `s-frr` / `frr` / `rr`。`active_sku: "compound"` 時のみ非 null（[ems-openapi-v2.md §7.4](ems-openapi-v2.md#74-複合商品-compound) 参照）|
 | `output_control_limit` | integer\|null | % | ✓ | ✓ | – | ✓ | 出力制御上限。consumer は `null` |
@@ -1895,7 +1907,7 @@ POST /v1/vpp/{vpp_id}/measurements/active_power
 POST /v1/vpp/{vpp_id}/measurements/energy
 ```
 
-**概要**: VPP配下の各物理EMSの期間内累積電力量（kWh）をメンバー別に取得し、VPP全体の合計値も併せて返却する。精算・履行評価・運用レポート用途。
+**概要**: VPP配下の各物理 EMSの期間内累積電力量（kWh）をメンバー別に取得し、VPP全体の合計値も併せて返却する。精算・履行評価・運用レポート用途。
 
 **保管期間**: **12 か月（365 日）**（それ以前のデータは取得不可、404）。**最小取得期間**: 60 秒。
 
@@ -1915,7 +1927,7 @@ POST /v1/vpp/{vpp_id}/measurements/energy
 | `start_time` | string | 必須 | 取得開始時刻（ISO 8601形式、**過去 12 か月（365 日）以内**。それ以前は 404） |
 | `end_time` | string | 必須 | 取得終了時刻（ISO 8601形式）。取得期間は最大31日。`start_time` から **最小 60 秒以降** |
 | `interval_seconds` | integer | 任意 | 集計粒度（秒）。**`1800`（30 分コマ）/ `3600`（1 時間）/ `86400`（日次）の 3 値のみ**指定可（それ以外は 400 `invalid_parameter`）。**省略時は期間全体を 1 レコードとして返却**。レスポンスは指定有無によらず常に `data[]` 形式（[後述](#レスポンス構造data-統一)）。物理 EMS API [§9.8 レスポンス構造](ems-openapi-v2.md#レスポンス構造data-統一) と同一の区切り方（`start_time` 起点、最終レコードは `end_time` 打ち切り。精算コマ突合時は 30 分境界起点を推奨）|
-| `ems_ids` | array | 任意 | 取得対象メンバー（物理EMS ID）の絞り込み。省略時は全登録メンバー。複合上限（下記）の評価も指定メンバー数で行う（§8.1 と同仕様）|
+| `ems_ids` | array | 任意 | 取得対象メンバー（物理 EMS ID）の絞り込み。省略時は全登録メンバー。複合上限（下記）の評価も指定メンバー数で行う（§8.1 と同仕様）|
 | `include_components` | boolean | 任意 | `true` 指定時、`multi_component` メンバーの `members[]` 要素に `components[]`（経路追跡フィールドを含む component 個別値）を含めて返却。デフォルト `false`（従来動作）|
 
 ### レスポンス例
@@ -2117,11 +2129,13 @@ POST /v1/vpp/{vpp_id}/measurements/energy
 
 | 項目名 | 型 | 単位 | battery | generator | consumer | multi_component | 説明 |
 |--------|------|------|:-:|:-:|:-:|:-:|------|
-| `ems_id` | string | - | ✓ | ✓ | ✓ | ✓ | 物理EMS識別子 |
+| `ems_id` | string | - | ✓ | ✓ | ✓ | ✓ | 物理 EMS識別子 |
 | `import_kwh` | number | kWh | ✓ | ✓ | ✓ | ✓ | 連系点での受電累積 |
 | `export_kwh` | number | kWh | ✓ | ✓ | ✓ | ✓ | 連系点での送電累積 |
 | `baseline_kwh` | number | kWh | – | ✓ | ✓ | ✓ | 期間内ベースライン累積（精算用、未設定なら 0）|
 | `self_consumed_kwh` | number | kWh | – | – | – | ✓ | 自家消費量（PV 由来 + battery 由来）|
+| `grid_to_load_kwh` | number | kWh | – | – | ✓ | △ | 系統 → サイト内負荷への直接供給量（`import_kwh` − battery の系統由来充電量）。`multi_component`: consumer component を含む場合のみ |
+| `consumption_kwh` | number | kWh | – | – | ✓ | △ | サイト内負荷の消費量（= `grid_to_load_kwh` + `self_consumed_kwh`）。`multi_component`: consumer component を含む場合のみ |
 | `imbalance_kwh` | number | kWh | – | △ | – | △ | 計画値同時同量のインバランス（generator: `/specifications.balancing_responsible: true` のみ。`multi_component`: FIP / non_subsidized サイトのみ）|
 | `fit_export_kwh` | number | kWh | – | △ | – | △ | FIT 対象の送電量（FIT 区分の generator / FIT 区分 generator component を含むサイトのみ。サイトレベル値、物理 EMS API §9.8 と同一定義）|
 | `fip_export_kwh` | number | kWh | – | △ | – | △ | FIP 対象の送電量（FIP 区分の generator / FIP 区分 generator component を含むサイトのみ。generator → 連系点直接送電分。battery 経由送電と合わせた FIP 精算の内訳が必要な場合は `include_components: true` で経路追跡フィールドを取得）|
@@ -2184,9 +2198,12 @@ POST /v1/vpp/{vpp_id}/measurements/energy
 | **400** | `compound_breakdown.fcr_response_kw` が負値、または `compound_breakdown.{s-frr, frr, rr}` の符号が `delta_kw` と不一致 | 6 | `compound_breakdown_sign_mismatch` |
 | **400** | `compound_breakdown.fcr_response_kw` がトップレベル `fcr_response_kw` と不一致 | 6 | `compound_breakdown_max_mismatch` |
 | **400** | `sku: "compound"` かつ FCR を含み `fcr_response_kw > \|delta_kw\|` | 6 | `compound_breakdown_value_exceeds_total` |
-| **400** | 指定した `ems_id` の物理EMSが存在しない（VPP登録時） | 4.2 | `ems_not_found` |
+| **400** | 指定した `ems_id` の物理 EMSが存在しない（VPP登録時） | 4.2 | `ems_not_found` |
 | **400** | `resource_type` の値不正 | 4.2 | `invalid_resource_type` |
-| **400** | `resource_type` が物理EMSの `components` 構成と不一致 | 4.2 | `resource_type_mismatch` |
+| **400** | `resource_type` が物理 EMSの `components` 構成と不一致 | 4.2 | `resource_type_mismatch` |
+| **400** | `member_baselines` 未指定または空配列 | 6 | `member_baselines_required` |
+| **400** | `member_baselines[]` に `in_service` メンバーの一部が欠落 | 6 | `member_baselines_incomplete` |
+| **400** | `member_baselines[]` に同一 `ems_id` が重複 | 6 | `member_baselines_duplicate` |
 | **400** | `member_baselines[].ems_id` がVPPに未登録 | 6 | `member_baselines_unknown_ems` |
 | **400** | VPP リクエストの按分・interval splitting 結果、いずれかのメンバーで生存ピース < 1 分が発生 | 6 | `schedule_split_too_narrow`（物理 EMS [§9.5.1](ems-openapi-v2.md#951-スケジュール重複時の動作後勝ちルール) 参照）|
 | **401** | 認証失敗（Refresh Token 不正、JWT 不正） | 全般 | `authentication_error` |
@@ -2205,7 +2222,7 @@ POST /v1/vpp/{vpp_id}/measurements/energy
 
 ### エラーオブジェクト共通項目
 
-物理EMS API [§11 エラーオブジェクト共通項目](ems-openapi-v2.md#11-エラーコード体系) と同形式。`ems_id` の代わりに `vpp_id` を使用。
+物理 EMS API [§11 エラーオブジェクト共通項目](ems-openapi-v2.md#11-エラーコード体系) と同形式。`ems_id` の代わりに `vpp_id` を使用。
 
 | 項目名 | 型 | 必須 | 説明 |
 |--------|------|:----:|------|
@@ -2222,7 +2239,7 @@ POST /v1/vpp/{vpp_id}/measurements/energy
 
 | 項目名 | 型 | 適用コード | 説明 |
 |--------|------|:---------:|------|
-| `ems_id` | string | 400, 404, 409（メンバー系）| 対象物理EMS識別子 |
+| `ems_id` | string | 400, 404, 409（メンバー系）| 対象物理 EMS識別子 |
 | `schedule_id` | string | 404, 409（スケジュール系）| 対象スケジュール識別子 |
 | `idempotency_key` | string | 409（冪等性競合）| 競合した冪等性キー |
 | `expires_at` | string | 401, 498 | トークン有効期限 |
@@ -2233,7 +2250,7 @@ POST /v1/vpp/{vpp_id}/measurements/energy
 
 ### VPP共通エラーレスポンス形式
 
-物理EMS APIと同形式。`ems_id`の代わりに`vpp_id`を使用:
+物理 EMS APIと同形式。`ems_id`の代わりに`vpp_id`を使用:
 
 ```json
 {
@@ -2339,7 +2356,7 @@ sequenceDiagram
     participant J as JEPX
     participant A as アグリゲーター
     participant V as VPP API
-    participant E as 各物理EMS
+    participant E as 各物理 EMS
 
     Note over J,A: 前日（スポット市場）
     A->>J: 入札（売り/買い）
@@ -2387,7 +2404,7 @@ sequenceDiagram
     participant O as 需給調整市場
     participant A as アグリゲーター
     participant V as VPP API
-    participant E as 各物理EMS
+    participant E as 各物理 EMS
     participant G as 電力系統
 
     Note over O,A: 前日（応札・落札）
@@ -2417,7 +2434,7 @@ sequenceDiagram
     participant O as 需給調整市場
     participant A as アグリゲーター
     participant V as VPP API
-    participant E as 各物理EMS
+    participant E as 各物理 EMS
 
     Note over O,A: 前日（応札・落札）
     A->>O: 応札（商品・kW・時間帯）
@@ -2455,7 +2472,24 @@ sequenceDiagram
 
 ## 12. 変更履歴
 
-> **互換性方針**: クライアント実装は常に最新版（現行 **v1.3**）ベースで開発すること。物理 EMS API **v2.2** と一体で運用する前提。
+> **互換性方針**: クライアント実装は常に最新版（現行 **v1.4**）ベースで開発すること。物理 EMS API **v2.2** と一体で運用する前提。
+
+> **物理 EMS API との改版タイミング**: v1.1〜v1.3 は物理 EMS API と同時改版してきましたが、**VPP API 側のみで完結する変更は VPP API 単独で改版**します（v1.4 がこれに該当）。
+
+### v1.4 (2026-09-10) — 正式版
+
+**後方互換の追加のみ**（非互換変更なし）。v1.3 の設計原則「アグリゲーターのデータ取得（監視・精算）は VPP API のみで完結する」の適用範囲を、**需要家メンバーの消費実績**まで広げるもの。物理 EMS API は v2.2 のまま変更ありません（**VPP v1.4 ↔ 物理 EMS v2.2**）。
+
+#### 追加
+
+| # | 変更 | 影響 |
+|---|------|------|
+| 1 | §8.2: `/measurements/energy` の `members[]` に **`grid_to_load_kwh`**（系統 → サイト内負荷への直接供給量）を追加。`consumer` / consumer component を含む `multi_component` メンバーで返却。定義は物理 EMS API [§9.8](ems-openapi-v2.md#98-電力量履歴-measurementsenergy) のサイトレベル同名フィールドと同一 | 追加（既存クライアントへの影響なし）|
+| 2 | §8.2: `/measurements/energy` の `members[]` に **`consumption_kwh`**（サイト内負荷の消費量 = `grid_to_load_kwh` + `self_consumed_kwh`）を追加。返却条件・定義は #1 と同じ | 同上 |
+
+> v1.3 までは、メンバー単位の消費実績を得るために物理 EMS API `/measurements/energy` の直接呼び出しが必要でした。v1.4 以降は VPP API のみで取得できます。`data[]` レコードの top-level 集計値は従来どおり精算主要 6 項目（`import_kwh` / `export_kwh` / `self_consumed_kwh` / `dr_delivered_kwh` / `curtailed_kwh` / `imbalance_kwh`）のままで、本 2 フィールドは**メンバー粒度のみ**の追加です。
+
+---
 
 ### v1.3 (2026-07-25) — 正式版
 
@@ -2520,8 +2554,6 @@ sequenceDiagram
 
 ### v1.1 (2026-05-14) — 正式版
 
-物理 EMS API v2.0 との整合性確保および設計原則統一を目的とした初の正式版リリース。
-
 **設計原則**: VPP API は物理 EMS API と**同じ JSON 構造・同じフィールド名**を採用する。差分は members 関連フィールド（`vpp_id` / `members[]` / `member_baselines[]` / `uncovered_kw`）の有無のみ。
 
 #### 主要変更点
@@ -2537,8 +2569,4 @@ sequenceDiagram
 | 7 | **複合商品（`compound`）対応**: `compound_breakdown` フィールド追加、内数ロジックバリデーション（取引規程別冊「複合約定」準拠）| EMS v2.0 §7.4 と整合 |
 | 8 | **エラーコード EMS と同名化**: `delta_kw_required` / `fcr_response_kw_required` / `compound_breakdown_*` 等、両 API で同じ `error_type` 名を使用。新規 `member_baselines_required` / `member_baselines_incomplete` / `member_baselines_duplicate` 追加 | クライアントのエラーハンドラ共通化可能 |
 | 9 | **冪等性（`Idempotency-Key`）サポート**: VPP `/control/active_power` で 24 時間保持・最大 128 文字、競合時 409 `idempotency_conflict` | EMS §9.4 と同形式 |
-
-#### 互換性
-
-（当時の記述）クライアント実装は v1.1 ベース、物理 EMS API v2.0 と一体で運用する前提。現行の互換性方針は [§12 冒頭](#12-変更履歴) を参照。
 

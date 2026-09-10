@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: API の利用契約・Base URL・認証情報のお問い合わせ
+    url: https://github.com/enapir/enecloud-api-spec/blob/main/README.md#-ライセンスと利用条件
+    about: 実エンドポイントの利用には別途サービス契約が必要です。Issues では受け付けていません。
+  - name: 本番・テスト環境の障害連絡
+    url: https://github.com/enapir/enecloud-api-spec/blob/main/README.md#-ライセンスと利用条件
+    about: 稼働中サービスの障害は、ご契約時にご案内している窓口へご連絡ください。

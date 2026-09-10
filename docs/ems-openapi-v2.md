@@ -3,14 +3,14 @@
 **バージョン**: 2.2
 **ステータス**: **正式版（Released）**
 **最終更新日**: 2026年7月25日
-**作成者**: 株式会社ナピル ソリューション事業部
+**作成者**: 株式会社ナピル ソリューション事業部 EMS開発担当
 **ライセンス**: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — 出典表示のもと、引用・再配布・本仕様に準拠した実装が可能です。
 **OpenAPI 定義**: [`openapi/ems-openapi-v2.yaml`](../openapi/ems-openapi-v2.yaml)
 
 > ### 本書の位置づけ
 >
 > 本書は **EMS OpenAPI v2**（パスプレフィックス `/v2/ems/{id}/`）の仕様であり、**新規開発の推奨版**です。
-> 1 サイト = 1 連系点単位の制御・計測 API です。複数 EMS を束ねる場合は [VPP API v1](vpp-api-v1.md) を併用してください（**v2.2 ↔ VPP v1.3** の組み合わせで運用）。
+> 1 サイト = 1 連系点単位の制御・計測 API です。複数 EMS を束ねる場合は [VPP API v1](vpp-api-v1.md) を併用してください（**v2.2 ↔ VPP v1.4** の組み合わせで運用）。
 >
 > 旧版の [EMS OpenAPI v1](ems-openapi-v1.md) は既存互換のために維持されています。
 
@@ -87,7 +87,7 @@ graph LR
 ```mermaid
 graph LR
     AGG[アグリゲーター<br/>クライアント]
-    VPP[VPP API<br/>v1.3]
+    VPP[VPP API<br/>v1.4]
     EMS[EMS API v2<br/>本仕様]
     DEV[EMS 制御装置<br/>リソース]
 
@@ -97,7 +97,7 @@ graph LR
     EMS --> DEV
 ```
 
-> リソース（EMS 制御装置）側は **EMS API の形式しか意識しない**（VPP の存在は透過的）。VPP API は本 EMS API と**同じ JSON 構造・同じフィールド名**を採用し、差分は members 関連フィールド（`vpp_id` / `members[]` / `member_baselines[]` / `dispatched_members[]` / `uncovered_kw`）の有無のみ。VPP top-level の電力値（`current_kw` / `baseline_kw` 等）は配下メンバーの稼働中合算、メンバー要素は EMS top-level と同形式（[vpp-api-v1.md §用語対応表](vpp-api-v1.md#14-用語フィールド対応表vpp-api--物理ems-api) 参照）。
+> リソース（EMS 制御装置）側は **EMS API の形式しか意識しない**（VPP の存在は透過的）。VPP API は本 EMS API と**同じ JSON 構造・同じフィールド名**を採用し、差分は members 関連フィールド（`vpp_id` / `members[]` / `member_baselines[]` / `dispatched_members[]` / `uncovered_kw`）の有無のみ。VPP top-level の電力値（`current_kw` / `baseline_kw` 等）は配下メンバーの稼働中合算、メンバー要素は EMS top-level と同形式（[vpp-api-v1.md §用語対応表](vpp-api-v1.md#14-用語フィールド対応表vpp-api--物理-ems-api) 参照）。
 
 ---
 
@@ -108,12 +108,18 @@ graph LR
 > **Base URL について**: 本番／テスト環境のホスト名は公開仕様には含めません。ご契約時に個別提供します。
 > 以下ではパスプレフィックス以降を記述します。
 
-| 区分 | パス |
-|------|------|
-| 通常API | `/v2/ems/{id}/` |
-| 認証API | `/auth/refresh` |
+| 区分 | ホスト | パス |
+|------|--------|------|
+| 通常API | `{APIホスト}` | `/v2/ems/{id}/` |
+| 認証API | **`{認証ホスト}`（別ホスト）** | `/auth/refresh` |
 
-`{id}` には EMS ID（16バイトUUID = 32文字hex）を指定。`/auth/refresh` のみ `/v2/ems/{id}/` プレフィックスを使用せず、かつ**API本体とは別ホスト**で提供されます。
+`{id}` には EMS ID（16バイトUUID = 32文字hex）を指定します。
+
+**例**: `/status` を呼び出す場合 → `{APIホスト}/v2/ems/{id}/status`
+
+> ⚠️ **`/auth/refresh` のみ URL 体系が異なります**: `/v2/ems/{id}/` プレフィックスを**使用せず**、かつ **`{APIホスト}` とは別の `{認証ホスト}`** で提供されます（`{認証ホスト}/auth/refresh`）。`{APIホスト}/v2/ems/{id}/auth/refresh` ではありません。
+> 本書ではこの 2 つのホストを `{APIホスト}` / `{認証ホスト}` と表記します（[§9.1 認証](#91-認証-authrefresh) でも同じ表記を使用）。いずれもご契約時に個別提供します。
+> OpenAPI 定義では、`{APIホスト}` をトップレベルの `servers`（`baseUrl`）、`{認証ホスト}` を `/auth/refresh` オペレーション側の `servers`（`authBaseUrl`）として表現しています。
 
 ### 認証方式
 
@@ -517,7 +523,8 @@ FCR（双方向応動幅）:
 
 > **`delta_kw` と `fcr_response_kw` の必須・禁止ルール**:
 > - **FCR の場合（`sku: "fcr"`）**: `fcr_response_kw` が **必須**、`delta_kw` は **指定不可**
-> - **FCR 以外の場合**: `delta_kw` が **必須**、`fcr_response_kw` は **指定不可**
+> - **複合商品の場合（`sku: "compound"`）**: `delta_kw` が **必須**、`fcr_response_kw` は **複合に FCR を含む場合のみ指定可**（[§7.4](#74-複合商品-compound) 参照）
+> - **上記以外の SKU**: `delta_kw` が **必須**、`fcr_response_kw` は **指定不可**
 > 違反時は 400 エラー（[§9.4 バリデーション](#94-有効電力制御-controlactive_power) 参照）。
 
 > **互換性に関する注意**: v1.x の `power_kw`（充電+/放電-）は v2 で **`delta_kw` にリネーム**された。値の符号方向は連系点基準（受電+/送電-）と**同一**。v2 では `delta_kw` を battery 限定から **全種別の市場約定指令フィールド**（連系点基準Δ電力）に拡張した。詳細は [§A.2 移行ガイド](#a2-既存蓄電所クライアントの差分破壊的変更含む) 参照。
@@ -533,7 +540,7 @@ FCR（双方向応動幅）:
 | **電力種別** | **本仕様の電力・電力量フィールドはすべて有効電力 (Active Power, kW) ベース**。無効電力 (Reactive Power, kvar)・皮相電力 (Apparent Power, kVA)・力率 (Power Factor) は本 API のスコープ外（EMS制御装置（PCS）側で自律管理）。需給調整市場・JEPX・容量市場・ネガワット市場はすべて有効電力 kW で取引されるため、本仕様で十分カバーされる。電圧調整サービス等で無効電力対応が必要になった場合は将来バージョンで拡張検討 |
 | **単位** | 電力値: kW（有効電力）、電力量値: kWh（有効電力量）、周波数: Hz |
 | **数値精度** | **kW 値および kWh 値は小数点以下 1 桁まで**（例: `1500.0`、`-45.2`）。リクエスト・レスポンス・JSON 例は全て 1 桁の小数表記で統一。送信側が整数値（`1500`）を送っても受理（サーバー側で `1500.0` として正規化）。% 値・周波数値の精度は本仕様では規定しない |
-| **日時形式** | ISO 8601 形式、**全て UTC**（末尾 `Z` 必須）。例: `2025-06-13T10:30:00Z` |
+| **日時形式** | ISO 8601 形式、**全て UTC**（末尾 `Z` 必須）。例: `2025-06-13T10:30:00Z`。本書のサンプルは **`2025-06-13` を基準日**として記述しています（VPP API 仕様書は `2026-04-04` を基準日とします）|
 | **EMS ID** | 16 バイト（128bit）UUID を 32 文字 hex で表記（ハイフン無し）。文字種: 0-9, a-f（小文字）|
 | **冪等性キー** | `/control/active_power` リクエストヘッダー `Idempotency-Key`（任意、最大 128 文字、24 時間保持）|
 
@@ -542,6 +549,11 @@ FCR（双方向応動幅）:
 | 制限回数 | 期間 | 適用範囲 |
 |---------|------|----------|
 | **1000 回** | **1 時間** | EMS ID 単位、スライディングウィンドウ |
+
+> **単一バケットである点に注意**: 物理 EMS API は参照系・制御系を区別せず、`/auth/refresh` を除く全エンドポイントで **1 つのバケット**（1000 回/時）を共有します。参照ポーリングを高頻度で回すと市場応動時の `/control/active_power` が枯渇し得るため、クライアント側で参照系の呼び出し予算を確保してください。
+> 複数サイトを束ねる運用では、参照系（1000 回/時）と制御系（200 回/時）を**独立したバケット**で管理する [VPP API](vpp-api-v1.md#24-レートリミット) の利用を推奨します。
+
+> **`/auth/refresh` のレートリミット**: 認証エンドポイント（`{認証ホスト}`）は API 本体とは別ホストのため上記バケットには含まれず、**Refresh Token 単位の独立したバケット**が適用されます（物理 EMS API・VPP API 共通）。上限値は API 本体と同じ **1000 回 / 1 時間**（スライディングウィンドウ）で、カウント単位のみ EMS ID / VPP ID ではなく Refresh Token になります。Access Token の有効期限は 30 日のため、通常運用でこの上限に達することはありません。
 
 レスポンスヘッダー:
 
@@ -687,15 +699,15 @@ FCR（双方向応動幅）:
 ```json
 {
   "sku": "compound",
-  "delta_kw": -15000,              // 複合 ΔkW 約定量（最大値 15 MW 放電方向）
-  "fcr_response_kw": 5000,         // FCR 双方向応動幅 ±5 MW（複合に FCR を含むとき）
+  "delta_kw": -15000.0,              // 複合 ΔkW 約定量（最大値 15 MW 放電方向）
+  "fcr_response_kw": 5000.0,         // FCR 双方向応動幅 ±5 MW（複合に FCR を含むとき）
   "compound_breakdown": {           // 参考情報（任意）、全 SKU の内訳
-    "fcr_response_kw": 5000,        // FCR ±5 MW（トップレベル `fcr_response_kw` と同値）
-    "s-frr": -8000,                 // 二次① 8 MW 放電方向（内数）
-    "frr":  -10000,                 // 二次② 10 MW 放電方向（内数）
-    "rr":   -15000                  // 三次① 15 MW 放電方向（= delta_kw・最大値）
+    "fcr_response_kw": 5000.0,        // FCR ±5 MW（トップレベル `fcr_response_kw` と同値）
+    "s-frr": -8000.0,                 // 二次① 8 MW 放電方向（内数）
+    "frr":  -10000.0,                 // 二次② 10 MW 放電方向（内数）
+    "rr":   -15000.0                  // 三次① 15 MW 放電方向（= delta_kw・最大値）
   },
-  "baseline_kw": 0
+  "baseline_kw": 0.0
 }
 ```
 
@@ -756,7 +768,7 @@ FCR（双方向応動幅）:
 | パラメータ | 最小値 | 最大値 | 単位 | 適用種別 | 備考 |
 |-----------|-------|-------|------|----------|------|
 | `delta_kw` | -999999.9 | 999999.9 | kW | 全 component（battery / consumer / generator）| **市場約定量** = 連系点基準の単方向Δ電力（baseline からの差分）。**FCR 以外の SKU で必須、FCR では指定不可**。**小数第 1 位まで指定可** |
-| `fcr_response_kw` | 0 | 999999.9 | kW | `fcr_capable: true` の component | **FCR 応動可能量**（双方向幅、絶対値）。**`sku: "fcr"` で必須、それ以外では指定不可**。**小数第 1 位まで指定可** |
+| `fcr_response_kw` | 0 | 999999.9 | kW | `fcr_capable: true` の component | **FCR 応動可能量**（双方向幅、絶対値）。**`sku: "fcr"` で必須、`sku: "compound"` では複合に FCR を含む場合のみ指定可、それ以外の SKU では指定不可**。**小数第 1 位まで指定可** |
 | `compound_breakdown` | - | - | - | `sku: "compound"` 時の参考情報（任意）| 複合商品の容量内訳（オブジェクト、`fcr_response_kw` / `s-frr` / `frr` / `rr` の 2 つ以上の組み合わせ）。応動制御はトップレベル `delta_kw` / `fcr_response_kw` が担い、本フィールドは**全 SKU 内訳の参考情報**（指定された場合のみ内数ルールバリデーションを適用、詳細は [§7.4](#74-複合商品-compound) 参照）|
 | `baseline_kw` | -999999.9 | 999999.9 | kW | 全 | ベースライン電力（連系点基準、generator では計画発電量を負値で指定）。**小数第 1 位まで指定可** |
 | `site_kw` | -999999.9 | 999999.9 | kW | `components.length ≥ 2` | サイトレベル目標電力（連系点絶対値）。**小数第 1 位まで指定可** |
@@ -829,6 +841,8 @@ FCR（双方向応動幅）:
 | `site_import_max_kw` | 0 | 999999.9 | kW | 全（`site_constraints`）| 連系点最大受電電力（契約電力）。**小数第 1 位まで指定可** |
 | `site_export_max_kw` | 0 | 999999.9 | kW | 全（`site_constraints`）| 連系点最大送電電力（連系容量、0 で逆潮流不可）。**小数第 1 位まで指定可** |
 | `components[]` 要素数 | 1 | 50 | - | 全 | サイト内 component 上限（1 = 単機サイト、2 以上 = `components.length ≥ 2` のサイト）|
+
+> **フィールド名の単位サフィックスについて**: `rated_cap`（kWh）/ `import_pwr_max`（kW）/ `export_pwr_max`（kW）は **EMS OpenAPI v1 からの互換名**のため単位サフィックスを持ちません。v2 で新設したフィールドは `rated_output_kw` / `site_import_max_kw` のように単位サフィックスを付す規約です。
 
 ### 8.6 `/status` 計測値の範囲
 
@@ -2965,7 +2979,7 @@ gantt
 | `fcr_response_kw_required` | 400 | `/control/active_power` | FCR では `fcr_response_kw` が必須 |
 | `delta_kw_not_allowed_for_fcr` | 400 | `/control/active_power` | FCR では `delta_kw` を指定できない |
 | `delta_kw_required` | 400 | `/control/active_power` | FCR以外では `delta_kw` が必須 |
-| `fcr_response_kw_not_allowed` | 400 | `/control/active_power` | FCR以外では `fcr_response_kw` を指定できない |
+| `fcr_response_kw_not_allowed` | 400 | `/control/active_power` | `sku != "fcr"` かつ `sku != "compound"` で `fcr_response_kw` を指定した（`compound` は複合に FCR を含む場合のみ指定可、[§7.4](#74-複合商品-compound) 参照）|
 | `schedule_query_out_of_range` | 400 | `/control/active_power/schedules` GET | 取得範囲が過去 30 日 〜 未来 90 日 を超過 |
 | `schedule_split_too_narrow` | 400 | `/control/active_power` | 後勝ちルールによる interval splitting で生存ピース < 1 分が発生（[§9.5.1](#951-スケジュール重複時の動作後勝ちルール) 不変条件違反、start/end を 1 分単位で揃えて再 POST）|
 | `schedule_not_found` | 404 | `/control/active_power/schedules` DELETE | 指定した `schedule_id` が存在しない |

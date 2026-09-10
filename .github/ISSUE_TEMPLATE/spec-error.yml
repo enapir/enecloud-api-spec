@@ -1,0 +1,45 @@
+name: 仕様の誤記・不整合の報告
+description: 仕様書と OpenAPI 定義の食い違い、記載漏れ、誤記などを報告します
+title: "[誤記] "
+labels: ["spec-error"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        仕様書の内容に関する報告フォームです。
+        **実エンドポイントの障害・接続不具合はこちらでは受け付けていません。**ご契約時にご案内している窓口へご連絡ください。
+
+  - type: dropdown
+    id: spec
+    attributes:
+      label: 対象の仕様
+      options:
+        - EMS OpenAPI v2 (2.2)
+        - VPP API v1 (1.3)
+        - EMS OpenAPI v1 (1.13・旧版)
+        - リポジトリ全体 / 公開サイト
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: 該当箇所
+      description: 節番号・ファイル名・行番号など、特定できる情報をご記入ください
+      placeholder: "例: docs/ems-openapi-v2.md §9.8 / openapi/vpp-openapi-v1.yaml の VppStatusDetailsResponse"
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: 内容
+      description: どのような記載になっており、何が問題かをご記入ください
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する記載（任意）
+      description: あるべき記載の案があればご記入ください

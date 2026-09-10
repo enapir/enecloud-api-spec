@@ -1,0 +1,44 @@
+name: Validate spec
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  openapi:
+    name: OpenAPI lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Lint OpenAPI definitions
+        run: |
+          npx --yes @redocly/cli@latest lint \
+            openapi/ems-openapi-v1.yaml \
+            openapi/ems-openapi-v2.yaml \
+            openapi/vpp-openapi-v1.yaml \
+            --format=stylish
+
+  docs:
+    name: Markdown consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # docs/*.md の内部アンカーリンク（245 本）が全て見出しに解決することを検証する。
+      # 節番号の変更やリネームでリンクが腐るのを防ぐ。
+      - name: Check internal anchor links
+        run: node .github/scripts/check-anchors.mjs
+
+      # 付録のサンプル JSON が構文的に正しいことを検証する。
+      # 意図的な省略記法（// コメント / ...）を含むブロックはスキップする。
+      - name: Check JSON samples
+        run: node .github/scripts/check-json-samples.mjs

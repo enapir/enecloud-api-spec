@@ -4,7 +4,7 @@ info:
   version: "2.2"
   description: |
     物理 EMS API。1 サイト = 1 連系点単位の制御・計測・スケジュール管理 API。
-    複数 EMS を束ねる場合は VPP API を併用する（推奨、VPP API v1.3 と一体運用）。
+    複数 EMS を束ねる場合は VPP API を併用する（推奨、VPP API v1.4 と一体運用）。
 
     v2.2 主要変更（非互換変更あり）:
     /measurements/energy のレスポンスを常に data[] 配列に統一（省略時は期間全体 1 レコード、
@@ -17,7 +17,7 @@ info:
     スケジュール取得範囲を未来 90 日に拡大、実行中スケジュールへの上書き POST 可、
     履歴系エラー（data_not_available / period_too_long / data_points_exceeded）の明示。
   contact:
-    name: 株式会社ナピル
+    name: 株式会社ナピル ソリューション事業部 EMS開発担当
   license:
     name: CC BY 4.0
     url: https://creativecommons.org/licenses/by/4.0/
@@ -25,12 +25,16 @@ info:
 servers:
   - url: '{baseUrl}'
     description: |
-      Base URL（本番／テスト環境のホスト名）は公開仕様には含めません。
+      API 本体の Base URL（本番／テスト環境のホスト名）は公開仕様には含めません。
       ご契約時に個別提供される値を baseUrl に設定してください。
+
+      注: この server は /v2/ems/{ems_id}/ 配下のエンドポイントにのみ適用される。
+      /auth/refresh は別ホスト（認証ホスト）で提供されるため、当該オペレーション側の
+      servers（authBaseUrl）で上書きされる。
     variables:
       baseUrl:
-        default: 'https://HOST'
-        description: 契約時に個別提供される Base URL（例 https://HOST）
+        default: 'https://API-HOST'
+        description: 契約時に個別提供される API 本体の Base URL（例 https://API-HOST）
 
 security:
   - bearerAuth: []
@@ -58,6 +62,16 @@ paths:
   /auth/refresh:
     post:
       operationId: refreshAccessToken
+      servers:
+        - url: '{authBaseUrl}'
+          description: |
+            認証ホスト。API 本体（baseUrl）とは別ホストで提供され、
+            パスプレフィックス（/v2/ems/{ems_id}/ ・ /v1/vpp/{vpp_id}/ 等）も使用しない。
+            ご契約時に API 本体の Base URL と併せて個別提供される。
+          variables:
+            authBaseUrl:
+              default: 'https://AUTH-HOST'
+              description: 契約時に個別提供される認証ホストの Base URL（例 https://AUTH-HOST）
       tags: [Auth]
       summary: Access Token 取得
       description: |
@@ -74,8 +88,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '498':
+          description: 498 Refresh Token 期限切れ／無効化（EMS運用担当に再発行を依頼）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /v2/ems/{ems_id}/status:
     get:
@@ -93,8 +112,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
   /v2/ems/{ems_id}/status/details:
     get:
@@ -112,8 +131,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusDetailsResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
   /v2/ems/{ems_id}/specifications:
     get:
@@ -131,8 +150,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/SpecificationsResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
   /v2/ems/{ems_id}/control/active_power:
     post:
@@ -143,7 +162,7 @@ paths:
         即座指示（immediate）またはスケジュール登録（schedule）。
         SKU により必須パラメータが異なる（FCR は fcr_response_kw 必須、それ以外は delta_kw 必須）。
 
-        スケジュール重複は後勝ちルール（§9.5.1）。jepx-da ⇄ jepx-ttv は同一 kWh ディスパッチ
+        スケジュール重複は後勝ちルール（docs/ems-openapi-v2.md §9.5.1）。jepx-da ⇄ jepx-ttv は同一 kWh ディスパッチ
         カテゴリとして上書き。実行中スケジュールへの上書き POST も可能（DELETE の 409 制約とは独立）。
       parameters:
         - $ref: '#/components/parameters/EmsIdPath'
@@ -163,11 +182,11 @@ paths:
                 $ref: '#/components/schemas/ControlActivePowerResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/PreconditionFailed' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /v2/ems/{ems_id}/control/active_power/schedules:
@@ -212,9 +231,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeleteSuccessResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
   /v2/ems/{ems_id}/baseline:
     post:
@@ -225,8 +244,12 @@ paths:
         consumer component を含むサイトの DR 履行評価用ベースライン値（30 分粒度、kW）を登録。
         UTC で 00 分 / 30 分境界に必須アライン。バルク上限 336 件（1 週間分）。
         後勝ち上書き、当日調整は 5h〜2h 前の 6 コマを再 POST。
+
+        本エンドポイントはスロット単位の後勝ち上書きのため同一内容の再送は自然冪等だが、
+        再送とバルク内容の取り違えを区別するため Idempotency-Key の付与を推奨する。
       parameters:
         - $ref: '#/components/parameters/EmsIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -242,11 +265,12 @@ paths:
                 $ref: '#/components/schemas/BaselinePostResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/PreconditionFailed' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
     get:
       operationId: getBaseline
       tags: [Baseline]
@@ -272,10 +296,10 @@ paths:
                 $ref: '#/components/schemas/BaselineGetResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
         '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
   /v2/ems/{ems_id}/measurements/active_power:
     post:
@@ -302,10 +326,10 @@ paths:
                 $ref: '#/components/schemas/MeasurementsActivePowerResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
         '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
   /v2/ems/{ems_id}/measurements/energy:
     post:
@@ -335,10 +359,10 @@ paths:
                 $ref: '#/components/schemas/MeasurementsEnergyResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
         '410': { $ref: '#/components/responses/Gone' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
   /v2/ems/{ems_id}/serviceplan:
     get:
@@ -351,6 +375,7 @@ paths:
           in: query
           required: false
           schema: { type: string, format: date-time }
+          description: 省略時は現在時刻を含む 30 分コマを起点とする
       responses:
         '200':
           description: 成功
@@ -358,9 +383,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServicePlanResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '498': { $ref: '#/components/responses/TokenExpired' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '498': { $ref: '#/components/responses/TokenExpired' }
 
 components:
 
@@ -401,7 +427,8 @@ components:
       properties:
         access_token: { type: string }
         token_type: { type: string, enum: [Bearer] }
-        expires_in: { type: integer, description: 秒 }
+        expires_in: { type: integer, description: '有効期間（秒）= 2,592,000 秒（30 日）' }
+        expires_at: { type: string, format: date-time, description: 有効期限（ISO 8601 UTC） }
 
     DeleteSuccessResponse:
       type: object
@@ -417,8 +444,15 @@ components:
     Component:
       type: object
       required: [component_id, component_type]
+      description: |
+        component 個別仕様（docs/ems-openapi-v2.md §8.5）。返却されるフィールドは
+        component_type / generator_kind により異なる（該当しないフィールドは非返却）。
+
+        命名について: rated_cap / import_pwr_max / export_pwr_max は EMS OpenAPI v1 からの
+        互換名のため単位サフィックスを持たない（それぞれ kWh / kW / kW）。v2 で新設した
+        フィールドは rated_output_kw / site_import_max_kw のように単位サフィックスを付す。
       properties:
-        component_id: { type: string, example: bat-1 }
+        component_id: { type: string, maxLength: 64, example: bat-1 }
         component_type:
           type: string
           enum: [battery, generator, consumer]
@@ -426,18 +460,76 @@ components:
           type: string
           enum: [thermal, pumped_storage, biomass, hydro, pv, wind, other]
           description: generator のみ
-        rated_cap: { type: number, description: 'battery 定格容量 (kWh)' }
-        rated_output_kw: { type: number, description: 'generator 定格出力 (kW)' }
-        min_output_kw: { type: number, description: 'generator 最低出力 (kW)' }
-        import_pwr_max: { type: number }
-        export_pwr_max: { type: number }
-        soc_op_max: { type: number, minimum: 0, maximum: 100 }
-        soc_op_min: { type: number, minimum: 0, maximum: 100 }
-        contract_kw: { type: number, description: 'consumer 契約電力 (kW)' }
-        max_dr_reduction_kw: { type: number }
-        min_dr_reduction_kw: { type: number }
-        min_dr_duration_minutes: { type: integer }
-        min_dr_cooldown_minutes: { type: integer }
+        rated_cap:
+          type: number
+          minimum: 0
+          maximum: 999999
+          description: 'battery 定格容量 (kWh、v1 互換名)'
+        import_pwr_max:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'battery 定格最大受電電力 (kW、v1 互換名)'
+        export_pwr_max:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'battery 定格最大送電電力 (kW、v1 互換名)'
+        soc_op_max: { type: number, minimum: 0, maximum: 100, description: 'battery 運用可能 SOC 上限 (%)' }
+        soc_op_min: { type: number, minimum: 0, maximum: 100, description: 'battery 運用可能 SOC 下限 (%)' }
+        rated_output_kw:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'generator 定格出力 (kW、全 generator_kind 共通)'
+        min_output_kw:
+          type: number
+          minimum: 0
+          description: 'generator 最低出力 (kW、ディスパッチ可能電源のみ。上限は rated_output_kw)'
+        ramp_rate_kw_per_min:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'generator 出力変化速度上限 (kW/分)'
+        pv_capacity_kw:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'generator (generator_kind=pv) パネル定格 (kW)'
+        upper_reservoir_capacity_kwh:
+          type: number
+          minimum: 0
+          maximum: 999999999
+          description: 'generator (generator_kind=pumped_storage) 上池蓄積電力量 (kWh)'
+        pump_input_max_kw:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'generator (generator_kind=pumped_storage) ポンプ運転時最大受電電力 (kW)'
+        contract_kw:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'consumer 契約電力 (kW)'
+        max_demand_kw:
+          type: number
+          minimum: 0
+          maximum: 999999.9
+          description: 'consumer 過去 1 年の最大需要 (kW)'
+        consumer_kind:
+          type: string
+          enum: [factory, commercial, residential_aggregate, data_center, cold_storage, ev_charging, other]
+          description: consumer のみ（需要家種別）
+        max_dr_reduction_kw:
+          type: number
+          minimum: 0
+          description: 'consumer DR 最大削減量 (kW、上限は contract_kw)'
+        min_dr_reduction_kw:
+          type: number
+          minimum: 0
+          description: 'consumer DR 最小削減量 (kW、上限は max_dr_reduction_kw)'
+        min_dr_duration_minutes: { type: integer, minimum: 1, maximum: 1440, description: 'consumer DR 最小継続時間（分）' }
+        min_dr_cooldown_minutes: { type: integer, minimum: 0, maximum: 1440, description: 'consumer DR 発動間最小休止時間（分）' }
         fcr_capable: { type: boolean }
         dr_capable: { type: boolean }
 
@@ -472,9 +564,13 @@ components:
 
     SpecificationsResponse:
       type: object
-      required: [ems_id, site_capability, site_constraints, components, timestamp]
+      required: [ems_id, effective_from, site_capability, site_constraints, components, timestamp]
       properties:
         ems_id: { type: string }
+        effective_from:
+          type: string
+          format: date-time
+          description: 仕様の有効開始時刻（ISO 8601 UTC、仕様変更時に更新）。過去仕様の参照は本 API では非対応
         site_capability: { $ref: '#/components/schemas/SiteCapability' }
         site_constraints: { $ref: '#/components/schemas/SiteConstraints' }
         components:
@@ -551,10 +647,16 @@ components:
               enum: [fit_curtailment, non_firm_congestion, manual, other, null]
         reactive_power:
           type: object
-          description: 将来枠（v2.2 現在も未返却）
+          description: |
+            将来枠。v2.2 では**キー自体を返却しない**（null ではなくブロック非存在）。
+            無効電力（kvar 系）は本 API のスコープ外で、EMS制御装置（PCS）側で自律管理する。
+            将来実装イメージは docs/ems-openapi-v2.md §9.2.2 のサンプルを参照。
         tso_dispatch_detail:
           type: object
-          description: 将来枠（v2.2 現在も未返却）
+          description: |
+            将来枠。v2.2 では**キー自体を返却しない**（null ではなくブロック非存在）。
+            出力制御以外の TSO 指令（電圧維持・並列継続等）の受信状況を格納する予定。
+            将来実装イメージは docs/ems-openapi-v2.md §9.2.2 のサンプルを参照。
         capacity:
           type: object
           properties:
@@ -674,11 +776,33 @@ components:
         start_time: { type: string, format: date-time }
         end_time: { type: string, format: date-time }
 
+    DispatchStatus:
+      type: string
+      enum: [dispatched, pending, skipped_out_of_service, skipped_incompatible]
+      description: |
+        指令結果（docs/ems-openapi-v2.md §8.8）。
+        VPP API では追加値（skipped_weight_zero / skipped_baseline_missing / failed）が定義される。
+
+    DispatchedComponent:
+      type: object
+      required: [component_id, component_type, dispatch_status]
+      description: サイトレベル制御（site_kw 指令）で EMS 内部最適化が各 component に配分した結果
+      properties:
+        component_id: { type: string, maxLength: 64 }
+        component_type:
+          type: string
+          enum: [battery, generator, consumer]
+        delta_kw: { type: [number, 'null'], description: 当該 component への Δ電力配分 }
+        dispatch_status: { $ref: '#/components/schemas/DispatchStatus' }
+
     ControlActivePowerResponse:
       type: object
       required: [ems_id, control_type, timestamp]
       properties:
         ems_id: { type: string }
+        message:
+          type: string
+          description: 処理結果の人間可読メッセージ（英語）
         control_type:
           type: string
           enum: [immediate, schedule]
@@ -687,6 +811,9 @@ components:
         compound_breakdown:
           $ref: '#/components/schemas/CompoundBreakdown'
         baseline_kw: { type: number }
+        site_kw:
+          type: [number, 'null']
+          description: 'サイトレベル指令時のみ返却（components.length ≥ 2 サイト、連系点絶対値）'
         sku: { $ref: '#/components/schemas/Sku' }
         duration_minutes: { type: [integer, 'null'] }
         start_time: { type: [string, 'null'], format: date-time }
@@ -695,6 +822,16 @@ components:
         affected_schedules:
           type: array
           items: { $ref: '#/components/schemas/AffectedSchedule' }
+        dispatched_components:
+          type: array
+          items: { $ref: '#/components/schemas/DispatchedComponent' }
+          description: 'サイトレベル制御（site_kw 指令）のレスポンスにのみ含まれる配分結果（docs/ems-openapi-v2.md §9.4）'
+        warning:
+          type: string
+          enum: [system_out_of_service]
+          description: |
+            警告付きで受理した場合のみ返却。system_out_of_service は
+            サイトが status: 9 の状態でスケジュール登録を受理したことを示す（200 OK）。
         timestamp: { type: string, format: date-time }
 
     # ========== /control/active_power/schedules GET ==========
@@ -875,8 +1012,9 @@ components:
         interval_seconds: { type: integer }
         data:
           type: array
+          maxItems: 44640
           items: { $ref: '#/components/schemas/ActivePowerDataPoint' }
-          description: 最大 44,640 件
+          description: 最大 44,640 件（超過時 410 data_points_exceeded）
         timestamp: { type: string, format: date-time }
 
     # ========== /measurements/energy ==========
