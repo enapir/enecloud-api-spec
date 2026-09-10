@@ -19,7 +19,7 @@
 [📘 API リファレンス](ems-v2.html){ .md-button .md-button--primary }
 [説明書](ems-openapi-v2.md){ .md-button }
 [サンプル集](ems-openapi-v2-samples.md){ .md-button }
-[OpenAPI YAML](openapi/ems-openapi-v2.yaml){ .md-button }
+[OpenAPI YAML](https://github.com/enapir/enecloud-api-spec/blob/main/openapi/ems-openapi-v2.yaml){ .md-button }
 
 ### VPP API v1 ⭐推奨
 
@@ -31,7 +31,7 @@
 [📘 API リファレンス](vpp-v1.html){ .md-button .md-button--primary }
 [説明書](vpp-api-v1.md){ .md-button }
 [サンプル集](vpp-api-v1-samples.md){ .md-button }
-[OpenAPI YAML](openapi/vpp-openapi-v1.yaml){ .md-button }
+[OpenAPI YAML](https://github.com/enapir/enecloud-api-spec/blob/main/openapi/vpp-openapi-v1.yaml){ .md-button }
 
 ### EMS OpenAPI v1（旧版・既存互換）
 
@@ -41,7 +41,21 @@
 
 [📘 API リファレンス](ems-v1.html){ .md-button }
 [説明書](ems-openapi-v1.md){ .md-button }
-[OpenAPI YAML](openapi/ems-openapi-v1.yaml){ .md-button }
+[OpenAPI YAML](https://github.com/enapir/enecloud-api-spec/blob/main/openapi/ems-openapi-v1.yaml){ .md-button }
+
+---
+
+!!! tip "コード生成・ツール連携で OpenAPI 定義を直接取得する場合"
+    本サイトからも配信しています（ブラウザで直接開くと GitHub Pages が `charset` を付与しないため
+    日本語が文字化けしますが、ファイル自体は UTF-8 で正しく、`curl` や各種ツールからの取得には影響しません）。
+
+    ```
+    https://enapir.github.io/enecloud-api-spec/openapi/ems-openapi-v2.yaml
+    https://enapir.github.io/enecloud-api-spec/openapi/vpp-openapi-v1.yaml
+    https://enapir.github.io/enecloud-api-spec/openapi/ems-openapi-v1.yaml
+    ```
+
+    ブラウザで読む場合は上記の **OpenAPI YAML** ボタン（GitHub 上の表示）をご利用ください。
 
 ---
 
