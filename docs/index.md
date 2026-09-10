@@ -30,6 +30,7 @@
 
 [📘 API リファレンス（Redoc）](vpp-v1.html){ .md-button .md-button--primary }
 [説明書](vpp-api-v1.md){ .md-button }
+[サンプル集](vpp-api-v1-samples.md){ .md-button }
 [OpenAPI YAML](openapi/vpp-openapi-v1.yaml){ .md-button }
 
 ### EMS OpenAPI v1（旧版・既存互換）

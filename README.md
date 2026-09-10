@@ -14,7 +14,7 @@
 | API | 版 | パスプレフィックス | 仕様書 | OpenAPI | リファレンス |
 |---|---|---|---|---|---|
 | **EMS OpenAPI v2** ⭐推奨 | 2.2 | `/v2/ems/{id}/` | [docs/ems-openapi-v2.md](docs/ems-openapi-v2.md)<br>[サンプル集](docs/ems-openapi-v2-samples.md) | [yaml](openapi/ems-openapi-v2.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/ems-v2.html) |
-| **VPP API v1** ⭐推奨 | 1.4 | `/v1/vpp/{vpp_id}/` | [docs/vpp-api-v1.md](docs/vpp-api-v1.md) | [yaml](openapi/vpp-openapi-v1.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/vpp-v1.html) |
+| **VPP API v1** ⭐推奨 | 1.4 | `/v1/vpp/{vpp_id}/` | [docs/vpp-api-v1.md](docs/vpp-api-v1.md)<br>[サンプル集](docs/vpp-api-v1-samples.md) | [yaml](openapi/vpp-openapi-v1.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/vpp-v1.html) |
 | EMS OpenAPI v1（旧版・既存互換） | 1.13 | `/v1/ems/{id}/` | [docs/ems-openapi-v1.md](docs/ems-openapi-v1.md) | [yaml](openapi/ems-openapi-v1.yaml) | [📘 閲覧](https://enapir.github.io/enecloud-api-spec/ems-v1.html) |
 
 > **新規開発は EMS OpenAPI v2 + VPP API v1 の組み合わせを使用してください。**

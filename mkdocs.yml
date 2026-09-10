@@ -60,7 +60,9 @@ nav:
   - EMS OpenAPI v2 (2.2):
       - 説明書: ems-openapi-v2.md
       - サンプル集: ems-openapi-v2-samples.md
-  - VPP API v1 (1.4): vpp-api-v1.md
+  - VPP API v1 (1.4):
+      - 説明書: vpp-api-v1.md
+      - サンプル集: vpp-api-v1-samples.md
   - EMS OpenAPI v1 (1.13・旧版): ems-openapi-v1.md
 
 plugins:
